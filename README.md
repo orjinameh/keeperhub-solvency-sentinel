@@ -72,7 +72,7 @@ agent polls `originalExecutionId` to learn the outcome of the work it was retryi
 npm install
 cp .env.example .env        # add KEEPERHUB_API_KEY and SENTINEL_USER
 npm run typecheck
-npm test                    # 24 tests: idempotency, decision logic, client errors
+npm test                    # 27 tests: idempotency, decision logic, client errors, e2e loop
 
 npm run check    -- --chain 84532 --user 0x…     # read-only health factor
 npm run monitor  -- --chain 84532 --user 0x…     # one-shot protect
@@ -80,10 +80,13 @@ npm run watch    -- --chain 84532 --user 0x… --interval 60
 npm run atom     -- --check-contract 0x… --check-fn balanceOf --value 0 \
                     --action-fn transfer --action-args '["0x…","1000000"]' --simulate
 npm run status   -- direct_123                    # poll an execution to terminal
+npm run monitor  -- --user 0x… --dry-run          # whole loop locally, no API key
 ```
 
 `monitor` simulates the repay, asks you to type `repay` to confirm, then
 broadcasts and verifies. Reports land in `docs/runs/` as JSON + Markdown.
+`--dry-run` runs the exact same loop against a local mock (no API key, nothing
+broadcast) and marks reports as DRY RUN.
 
 ## The atomic path: `check-and-execute`
 
