@@ -95,6 +95,25 @@ conditionally executes — one KeeperHub call, no agent loop in between. Useful 
 the off-switch primitive ("if wallet balance < X, top it up") when you want
 KeeperHub's backend, not the agent's loop, to own the decision.
 
+## MCP server (KeeperHub surface #1)
+
+Any MCP-capable agent can drive the sentinel directly. Three tools:
+`sentinel_check` (read-only health factor), `sentinel_monitor` (full protect
+loop, returns the run report), `sentinel_status` (execution + receipts).
+
+```bash
+npm run mcp    # stdio MCP server
+```
+
+Claude Code / other MCP hosts:
+
+```bash
+claude mcp add --transport stdio sentinel -- npm run mcp
+```
+
+`sentinel_monitor` supports `dryRun` for zero-risk evaluation; live broadcasts
+need `KEEPERHUB_API_KEY` and default to an operator confirm.
+
 ## Supported chains
 
 Aave V3 pool addresses are pinned per chain (from `@bgd-labs/aave-address-book`):
