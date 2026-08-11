@@ -1,0 +1,141 @@
+{
+  "taskId": "sentinel-monitor-12345678",
+  "chainId": "84532",
+  "user": "0x1234567890abcdef1234567890abcdef12345678",
+  "startedAt": "2026-08-11T22:38:47.419Z",
+  "account": {
+    "user": "0x1234567890abcdef1234567890abcdef12345678",
+    "chainId": "84532",
+    "chain": "Base Sepolia",
+    "healthFactor": "1.0200",
+    "totalCollateralUsd": "$1000.00",
+    "totalDebtUsd": "$800.00",
+    "availableBorrowUsd": "$0.00",
+    "liquidationThreshold": "80.0%",
+    "ltv": "75.0%"
+  },
+  "decision": {
+    "level": "critical",
+    "shouldAct": true,
+    "reason": "Health factor 1.020 dropped below critical threshold 1.05."
+  },
+  "steps": [
+    {
+      "name": "read-position",
+      "ok": true,
+      "detail": "HF 1.0200",
+      "data": {
+        "user": "0x1234567890abcdef1234567890abcdef12345678",
+        "chainId": "84532",
+        "chain": "Base Sepolia",
+        "healthFactor": "1.0200",
+        "totalCollateralUsd": "$1000.00",
+        "totalDebtUsd": "$800.00",
+        "availableBorrowUsd": "$0.00",
+        "liquidationThreshold": "80.0%",
+        "ltv": "75.0%"
+      }
+    },
+    {
+      "name": "evaluate",
+      "ok": true,
+      "detail": "Health factor 1.020 dropped below critical threshold 1.05.",
+      "data": {
+        "level": "critical",
+        "shouldAct": true
+      }
+    },
+    {
+      "name": "find-debt-asset",
+      "ok": true,
+      "detail": "debt asset 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (variable 800000000, stable 0)"
+    },
+    {
+      "name": "simulate",
+      "ok": true,
+      "detail": "gasEstimate=186000 from=0x1234567890abcdef1234567890abcdef12345678",
+      "data": {
+        "success": true,
+        "status": "simulated",
+        "gasEstimate": "186000",
+        "from": "0x1234567890abcdef1234567890abcdef12345678",
+        "to": "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27",
+        "value": "0",
+        "simulatedReturnValue": "618000000000000000000",
+        "wouldRevert": false
+      }
+    },
+    {
+      "name": "execute",
+      "ok": true,
+      "detail": "executionId=direct_dry_686438 status=completed",
+      "data": {
+        "executionId": "direct_dry_686438",
+        "status": "completed",
+        "transactionHash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "transactionLink": "https://sepolia.basescan.org/tx/0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "idempotentReplay": false,
+        "taskId": "sentinel-monitor-12345678|repay"
+      }
+    },
+    {
+      "name": "poll",
+      "ok": true,
+      "detail": "final status=completed (receipts from status endpoint)",
+      "data": {
+        "executionId": "direct_dry_686438",
+        "status": "completed",
+        "type": "contract-call",
+        "transactionHash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "transactionLink": "https://sepolia.basescan.org/tx/0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "sponsored": false,
+        "receipts": [
+          {
+            "hash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "chainId": 84532,
+            "verified": true,
+            "receiptStatus": "success",
+            "blockNumber": 9999999,
+            "gasUsed": "186000",
+            "verifiedAt": "2026-08-11T22:38:47.426Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "verify",
+      "ok": true,
+      "detail": "verified=1 receipt(s)",
+      "data": [
+        {
+          "hash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "chainId": 84532,
+          "verified": true,
+          "receiptStatus": "success",
+          "blockNumber": 9999999,
+          "gasUsed": "186000"
+        }
+      ]
+    }
+  ],
+  "execution": {
+    "executionId": "direct_dry_686438",
+    "status": "completed",
+    "transactionHash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "transactionLink": "https://sepolia.basescan.org/tx/0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sponsored": false,
+    "receipts": [
+      {
+        "hash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "chainId": 84532,
+        "verified": true,
+        "receiptStatus": "success",
+        "blockNumber": 9999999,
+        "gasUsed": "186000"
+      }
+    ],
+    "idempotentReplay": false
+  },
+  "dryRun": true,
+  "finishedAt": "2026-08-11T22:38:47.426Z"
+}

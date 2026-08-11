@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "status": "simulated",
+  "from": "0x742d35cc6634c0532925a3b844bc454e4438f44e",
+  "to": "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27",
+  "value": "0",
+  "gasEstimate": "186000",
+  "simulatedReturnValue": "618000000000000000000",
+  "wouldRevert": false
+}

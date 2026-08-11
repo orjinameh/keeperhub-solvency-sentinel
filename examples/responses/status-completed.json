@@ -1,0 +1,24 @@
+{
+  "executionId": "direct_123",
+  "status": "completed",
+  "type": "contract-call",
+  "transactionHash": "0x7c4a2f9e1b8d3c5a6f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a",
+  "transactionLink": "https://sepolia.basescan.org/tx/0x7c4a2f9e1b8d3c5a6f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a",
+  "sponsored": false,
+  "receipts": [
+    {
+      "hash": "0x7c4a2f9e1b8d3c5a6f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a",
+      "chainId": 84532,
+      "verified": true,
+      "receiptStatus": "success",
+      "blockNumber": 11413447,
+      "gasUsed": "186000",
+      "verifiedAt": "2026-08-11T22:45:00Z"
+    }
+  ],
+  "gasUsedWei": "298260000000000",
+  "result": null,
+  "error": null,
+  "createdAt": "2026-08-11T22:44:59Z",
+  "completedAt": "2026-08-11T22:45:00Z"
+}

@@ -1,0 +1,36 @@
+{
+  "name": "keeperhub-solvency-sentinel",
+  "version": "1.0.0",
+  "description": "Solvency Sentinel — an agent that watches a DeFi lending position and auto-executes protective transactions through KeeperHub (simulate-first, idempotent, receipt-verified)",
+  "bin": {
+    "solvency-sentinel": "src/index.ts"
+  },
+  "scripts": {
+    "start": "node --import tsx/esm src/index.ts",
+    "monitor": "node --import tsx/esm src/index.ts monitor",
+    "check": "node --import tsx/esm src/index.ts check",
+    "atom": "node --import tsx/esm src/index.ts atom",
+    "status": "node --import tsx/esm src/index.ts status",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx/esm --test test/*.test.ts"
+  },
+  "keywords": [
+    "keeperhub",
+    "aave",
+    "defi",
+    "agent",
+    "x402",
+    "health-factor"
+  ],
+  "author": "orjinameh",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3"
+  }
+}
