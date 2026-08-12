@@ -286,11 +286,18 @@ button.ghost{background:transparent;border:1px solid var(--line);color:var(--mut
 
   <div id="consentBox"${loggedIn ? "" : ' style="display:none"'}">
     <div class="ok" id="signedIn">${loggedIn ? "Signed in as <b>" + esc(email) + "</b>" : ""}</div>
-    <p style="margin-top:6px">Only your verified positions can be checked or rescued — every other address is refused.</p>
-    <form action="/consent" method="post">
+    <div id="walletStep">
+      <p style="margin:10px 0 4px">Connect the wallet that owns your positions &mdash; the agent will only check and rescue its verified positions.</p>
+      <button type="button" id="walletBtn">Connect wallet</button>
+      <div class="ok" id="walletInfo"></div>
+      <div class="err" id="walletErr"></div>
+    </div>
+    <p style="margin-top:6px">Only your verified positions can be checked or rescued &mdash; every other address is refused.</p>
+    <form action="/consent" method="post" id="consentForm">
 ${inputs}
-      <button type="submit">Authorize</button>
+      <button type="submit" id="authorizeBtn" disabled>Authorize</button>
     </form>
+    <div class="switch"><a id="skipWallet">Continue without connecting a wallet</a></div>
   </div>
 </div>
 <script>
@@ -301,7 +308,28 @@ function showConsent(email){
   $("authBox").style.display="none";
   $("consentBox").style.display="block";
   $("signedIn").innerHTML="Signed in as <b>"+email.replace(/[<>&]/g,"")+"</b>";
+  initWallet();
 }
+function enableAuthorize(){$("authorizeBtn").disabled=false}
+function initWallet(){
+  if(!(window.ethereum&&window.ethereum.request)){
+    $("walletBtn").style.display="none";
+    $("walletErr").textContent="No browser wallet detected (e.g. MetaMask). You can continue — connect later in the Control Room.";
+    enableAuthorize();
+  }
+}
+$("walletBtn").addEventListener("click",function(){
+  if(!(window.ethereum&&window.ethereum.request))return;
+  $("walletErr").textContent="";
+  window.ethereum.request({method:"eth_requestAccounts"}).then(function(accs){
+    return window.ethereum.request({method:"eth_chainId"}).then(function(cid){
+      $("walletBtn").style.display="none";
+      $("walletInfo").textContent="Connected: "+accs[0].toLowerCase()+" (network "+parseInt(cid,16)+")";
+      enableAuthorize();
+    });
+  }).catch(function(e){$("walletErr").textContent="Connection failed or cancelled: "+(e.message||String(e))});
+});
+$("skipWallet").addEventListener("click",function(e){e.preventDefault();$("walletStep").style.display="none";enableAuthorize()});
 function submit(path,email,pw){
   return fetch(path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:email,password:pw})}).then(function(r){return r.json()}).then(function(d){
     if(d.ok){showConsent(email);return}
