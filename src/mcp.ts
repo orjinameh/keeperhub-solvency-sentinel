@@ -146,14 +146,7 @@ async function runHttp(port: number, token: string): Promise<void> {
     next();
   };
 
-  const handlePost: express.RequestHandler = async (req, res) => {
-    const sid = sessionHeader(req);
-    if (sid) {
-      const session = sessions.get(sid);
-      if (!session) return sessionNotFound(res);
-      return await session.transport.handleRequest(req, res, req.body);
-    }
-
+  const openSession: express.RequestHandler = async (req, res) => {
     const server = buildServer();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomBytes(16).toString("hex"),
@@ -167,6 +160,22 @@ async function runHttp(port: number, token: string): Promise<void> {
         sessions.delete(sessionId);
       };
     }
+  };
+
+  const handlePost: express.RequestHandler = async (req, res) => {
+    const sid = sessionHeader(req);
+    if (sid) {
+      const session = sessions.get(sid);
+      if (!session) {
+        const body = (req.body ?? {}) as { method?: string };
+        if (body.method === "initialize") {
+          return await openSession(req, res);
+        }
+        return sessionNotFound(res);
+      }
+      return await session.transport.handleRequest(req, res, req.body);
+    }
+    return await openSession(req, res);
   };
 
   const handleDelete: express.RequestHandler = async (req, res) => {
