@@ -178,9 +178,7 @@ a{color:var(--acc)}
       </div>
       <div class="row">
         <div class="info">
-          <label style="margin:0 0 4px;display:block;color:var(--mut);font-size:12.5px">Claim chain</label>
-          <select id="walletChain" style="width:260px" disabled></select>
-          <div class="d" style="margin-top:6px">The agent checks the position on this chain. Your wallet's active network is only a default — pick the chain where the position actually lives (e.g. Sepolia = 11155111).</div>
+          <div class="d">One signature verifies wallet control for <strong>all supported chains</strong> (Sepolia, Base, Ethereum, Arbitrum, Polygon) — no need to match your wallet's active network.</div>
         </div>
       </div>
     </div>
@@ -308,21 +306,10 @@ fetch("/api/portal/auth/status").then(function(r){return r.json()}).then(functio
 var wallet=null;
 try{wallet=JSON.parse(localStorage.getItem("sentinel_wallet")||"null")}catch(e){}
 function walletAvailable(){return !!(window.ethereum&&window.ethereum.request)}
-function claimMessage(chainId,address){
-  return "Solvency Sentinel — I control the Aave V3 position on "+chainName(chainId)+" (chain id "+chainId+") at "+address+".";
-}
-function claimChain(){
-  var s=$("walletChain");if(s&&s.value)return s.value;
-  return wallet&&wallet.chainId?String(wallet.chainId):"11155111";
+function claimMessage(address){
+  return "Solvency Sentinel — I control the wallet "+address+". Verify my Aave positions on all supported chains.";
 }
 function walletMsg(t,cls){var m=$("walletMsg");if(m){m.className="msg "+cls;m.textContent=t}}
-(function initChainSelect(){
-  var s=$("walletChain");if(!s)return;
-  CHAINS.forEach(function(c){var o=document.createElement("option");o.value=c[0];o.textContent=c[1]+" (id "+c[0]+")";s.appendChild(o)});
-  s.addEventListener("change",function(){
-    if(wallet){localStorage.setItem("sentinel_claim_chain",s.value);renderWallets()}
-  });
-})();
 function renderWallets(){
   var connected=wallet&&wallet.address;
   $("walletAddr").textContent=connected?wallet.address:"No wallet connected";
@@ -330,17 +317,7 @@ function renderWallets(){
   $("walletConnectBtn").style.display=walletAvailable()?"inline-flex":"none";
   $("walletDisconnectBtn").style.display=connected?"inline-flex":"none";
   $("walletClaimBtn").disabled=!connected;
-  var s=$("walletChain");
-  if(s){
-    s.disabled=!connected;
-    if(connected){
-      var want=localStorage.getItem("sentinel_claim_chain");
-      if(!want)want=String(wallet.chainId);
-      var o=s.querySelector('option[value="'+want.replace(/[^\d]/g,"")+'"]');
-      s.value=o?want:wallet.chainId;
-    }
-  }
-  $("walletClaimMsg").textContent=connected?claimMessage(claimChain(),wallet.address):"connect a wallet first";
+  $("walletClaimMsg").textContent=connected?claimMessage(wallet.address):"connect a wallet first";
 }
 $("walletConnectBtn").addEventListener("click",function(){
   if(!walletAvailable()){walletMsg("No browser wallet found (MetaMask or similar).","err");return}
@@ -359,12 +336,11 @@ $("walletClaimBtn").addEventListener("click",function(){
   if(!wallet)return;
   $("walletClaimBtn").disabled=true;
   walletMsg("","ok");
-  var chainId=claimChain();
-  var msg=claimMessage(chainId,wallet.address);
+  var msg=claimMessage(wallet.address);
   window.ethereum.request({method:"personal_sign",params:[msg,wallet.address]}).then(function(sig){
-    return api("/api/register-position",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chainId:chainId,address:wallet.address,message:msg,signature:sig})}).then(function(r){
+    return api("/api/register-position",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chainId:"*",address:wallet.address,message:msg,signature:sig})}).then(function(r){
       $("walletClaimBtn").disabled=false;
-      if(r.d.ok){walletMsg("Ownership verified on "+chainName(chainId)+". Position added — see Overview.","ok");setTab("overview");return loadMe()}
+      if(r.d.ok){walletMsg("Ownership verified — this wallet is now checkable on all supported chains. See Overview.","ok");setTab("overview");return loadMe()}
       walletMsg(r.d.error||"Registration failed.","err");
     });
   }).catch(function(e){$("walletClaimBtn").disabled=false;walletMsg("Signing failed or cancelled: "+(e.message||String(e)),"err")});
@@ -403,7 +379,7 @@ function renderOverview(){
   if(!state.positions.length){el.innerHTML='<div class="empty">No claimed positions yet. Connect a wallet in the Wallets tab to prove ownership.</div>';return}
   el.innerHTML=state.positions.map(function(p){
     var idx=state.positions.indexOf(p);
-    return '<div class="row"><div class="info"><div class="t">'+chainName(p.chainId)+' <span class="hf" id="hf'+idx+'"></span></div>'+
+    return '<div class="row"><div class="info"><div class="t">'+chainLabel(p)+' <span class="hf" id="hf'+idx+'"></span></div>'+
       '<div class="d">'+esc(p.address)+'</div><div class="meta">claimed '+ts(p.registeredAt)+' · <span class="badge b-ok">verified owner</span></div></div>'+
       '<div class="actions"><button class="btn btn-ghost" data-act="live" data-idx="'+idx+'">Refresh health</button>'+
       '<button class="btn btn-primary" data-act="protect" data-idx="'+idx+'">Dry-run protect</button></div></div>';
@@ -417,15 +393,40 @@ function renderOverview(){
   state.positions.forEach(function(_,i){liveHealth(i)});
 }
 
+function chainLabel(p){
+  return p.chainId==="*"?'<span id="chainOf'+state.positions.indexOf(p)+'">All supported Aave chains</span>':chainName(p.chainId);
+}
+function liveChains(p){
+  return p.chainId==="*"?CHAINS.map(function(c){return c[0]}):[p.chainId];
+}
+function realHf(h){return typeof h==="number"&&isFinite(h)&&h<1e6}
+function resolveLiveChain(p){
+  if(p.chainId!=="*")return Promise.resolve(p.chainId);
+  return Promise.all(CHAINS.map(function(c){
+    return api("/api/status?chainId="+c[0]+"&user="+encodeURIComponent(p.address)).then(function(r){
+      return r.status===200&&r.d.account&&realHf(Number(r.d.account.healthFactor))?c[0]:null;
+    }).catch(function(){return null});
+  })).then(function(found){return found.filter(Boolean)[0]||CHAINS[0][0]});
+}
+
 function liveHealth(idx){
   var p=state.positions[idx];if(!p)return;
   var el=$("hf"+idx);if(!el)return;
   el.textContent=" …";
-  api("/api/status?chainId="+encodeURIComponent(p.chainId)+"&user="+encodeURIComponent(p.address)).then(function(r){
-    var hf=r.d.account?Number(r.d.account.healthFactor):null;
-    el.innerHTML="<span class='hf "+hfClass(hf)+"'>HF "+String(hf==null?"–":hf.toFixed(4))+"</span> "+statusBadge(r.d.decision?r.d.decision.level:"?");
-  }).catch(function(e){el.textContent="err"}).then(function(){
-    // ensure any previous spin removed
+  Promise.all(liveChains(p).map(function(cid){
+    return api("/api/status?chainId="+encodeURIComponent(cid)+"&user="+encodeURIComponent(p.address)).then(function(r){
+      return {cid:cid,ok:r.status===200,account:r.d.account,decision:r.d.decision};
+    }).catch(function(){return {cid:cid,ok:false}});
+  })).then(function(res){
+    var live=res.filter(function(r){return r.ok&&r.account&&realHf(Number(r.account.healthFactor))});
+    var best=live.slice().sort(function(a,b){return Number(a.account.healthFactor)-Number(b.account.healthFactor)})[0];
+    var show=best||res[0];
+    if(!show||!show.ok){el.textContent="no data";return}
+    var hf=show.account?Number(show.account.healthFactor):null;
+    el.innerHTML="<span class='hf "+hfClass(hf)+"'>HF "+String(hf==null?"–":hf.toFixed(4))+"</span> "+statusBadge(show.decision?show.decision.level:"?");
+    if(best&&p.chainId==="*"){
+      var nm=$("chainOf"+idx);if(nm)nm.textContent=chainName(best.cid);
+    }
   });
 }
 
@@ -436,13 +437,15 @@ function dryRun(idx,btn){
   var prev=row.querySelector(".runout");if(prev)prev.remove();
   var out=document.createElement("div");out.className="runout";out.style.cssText="flex-basis:100%;font-size:12.5px;color:var(--mut);font-family:var(--mono)";
   row.appendChild(out);out.textContent="simulating…";
-  api("/api/portal/protect/dryrun",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chainId:p.chainId,user:p.address})}).then(function(r){
-    var d=r.d;if(!d.ok){out.textContent="✗ "+d.error;return}
-    var rep=d.report;
-    var lvl=rep.decision.level;
-    out.innerHTML="<span class='badge "+ (lvl==="healthy"?"b-ok":lvl==="watch"?"b-warn":"b-bad") +"'>"+esc(lvl.toUpperCase())+"</span> "+esc(rep.decision.reason)+"<br>"+esc((rep.steps||[]).map(function(s){return s.name+": "+s.ok} ).join(" → "));
-    var ex=rep.execution;if(ex&&ex.transactionLink){out.innerHTML+='<br>tx: <a href="'+esc(ex.transactionLink)+'" target="_blank">'+esc(ex.transactionLink)+'</a>'}
-    out.innerHTML+="<br>ran "+ts(rep.startedAt)+" (dry run, nothing broadcast)";
+  resolveLiveChain(p).then(function(cid){
+    return api("/api/portal/protect/dryrun",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chainId:cid,user:p.address})}).then(function(r){
+      var d=r.d;if(!d.ok){out.textContent="✗ "+d.error;return}
+      var rep=d.report;
+      var lvl=rep.decision.level;
+      out.innerHTML="<span class='badge "+ (lvl==="healthy"?"b-ok":lvl==="watch"?"b-warn":"b-bad") +"'>"+esc(lvl.toUpperCase())+"</span> "+esc(rep.decision.reason)+"<br>on "+esc(chainName(cid))+" · "+esc((rep.steps||[]).map(function(s){return s.name+": "+s.ok} ).join(" → "));
+      var ex=rep.execution;if(ex&&ex.transactionLink){out.innerHTML+='<br>tx: <a href="'+esc(ex.transactionLink)+'" target="_blank">'+esc(ex.transactionLink)+'</a>'}
+      out.innerHTML+="<br>ran "+ts(rep.startedAt)+" (dry run, nothing broadcast)";
+    });
   }).catch(function(e){out.textContent="✗ "+e.message}).then(function(){btn.disabled=false;btn.textContent=orig});
 }
 

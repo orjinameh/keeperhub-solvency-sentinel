@@ -19,6 +19,9 @@ export interface RegisterArgs {
  * records it so sentinel_monitor may broadcast rescues against it. The
  * signature IS the authorization — anyone can register any address, but only
  * the wallet that actually owns the address can produce a valid signature.
+ * Ownership is stored wallet-wide (chainId "*") — one signature verifies the
+ * wallet's positions on every supported chain, so the claim never drifts out
+ * of sync with the chain an agent happens to check.
  */
 export async function registerPosition(args: RegisterArgs): Promise<RegisterResult> {
   if (!isAddress(args.address)) return { ok: false, error: `Invalid address: ${args.address}` };
@@ -39,7 +42,7 @@ export async function registerPosition(args: RegisterArgs): Promise<RegisterResu
   const store = await getStore();
   await store.addPosition({
     address: args.address,
-    chainId: args.chainId,
+    chainId: "*",
     message: args.message,
     signature: args.signature,
     registeredAt: Date.now(),

@@ -141,7 +141,9 @@ class MemoryStore implements Store {
   }
   async ownsPosition(chainId: string, address: string): Promise<boolean> {
     return this.positions.some(
-      (p) => p.chainId === chainId && p.address.toLowerCase() === address.toLowerCase()
+      (p) =>
+        (p.chainId === "*" || p.chainId === chainId) &&
+        p.address.toLowerCase() === address.toLowerCase()
     );
   }
   async addPosition(pos: OwnedPositionRec): Promise<void> {
@@ -282,7 +284,7 @@ class MongoStore implements Store {
   }
   async ownsPosition(chainId: string, address: string): Promise<boolean> {
     const d = await this.findOne("positions", {
-      chainId,
+      $or: [{ chainId: "*" }, { chainId }],
       address: { $regex: `^${address.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
     });
     return !!d;
