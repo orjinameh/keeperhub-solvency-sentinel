@@ -131,6 +131,7 @@ a{color:var(--acc)}
   <div class="sub" id="pageSub">Signing in…</div>
   <div class="tabs">
     <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="wallets">Wallets</button>
     <button class="tab" data-tab="credentials">Credentials</button>
     <button class="tab" data-tab="agents">Agents</button>
     <button class="tab" data-tab="approvals">Approvals</button>
@@ -145,9 +146,38 @@ a{color:var(--acc)}
       <div class="card"><div class="lbl">Agent calls</div><div class="num" id="statActivity">–</div><div class="hint">MCP tool invocations recorded</div></div>
     </div>
     <div class="section-title">Your positions</div>
-    <div class="list" id="posList"><div class="empty">No claimed positions yet. Claim one on the landing page, or wait for the agent to do it via <code>sentinel_register</code>.</div></div>
+    <div class="list" id="posList"><div class="empty">No claimed positions yet. Connect a wallet in the <strong>Wallets</strong> tab to prove ownership, or claim on the landing page.</div></div>
     <div class="section-title">Latest agent activity</div>
     <div class="list" id="ovActivity"></div>
+  </section>
+
+  <section class="panel" id="p-wallets">
+    <div class="sub" style="margin-bottom:14px">Connect the wallet that owns a position to prove control. The wallet signs a one-time message (personal_sign); the server recovers the signer and records ownership — it never sees your private key.</div>
+    <div class="section-title">Connected wallet</div>
+    <div class="list">
+      <div class="row">
+        <div class="info">
+          <div class="t" id="walletAddr">No wallet connected</div>
+          <div class="d" id="walletNet">Connect a browser wallet (e.g. MetaMask) to get started.</div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="walletConnectBtn" style="display:none">Connect wallet</button>
+          <button class="btn btn-ghost" id="walletDisconnectBtn" style="display:none">Disconnect</button>
+        </div>
+      </div>
+    </div>
+    <div class="section-title">Verify ownership &amp; add position</div>
+    <div class="list">
+      <div class="row">
+        <div class="info">
+          <div class="d">The wallet will sign: <code id="walletClaimMsg">connect a wallet first</code></div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="walletClaimBtn" disabled>Sign &amp; verify</button>
+        </div>
+      </div>
+    </div>
+    <div class="msg" id="walletMsg"></div>
   </section>
 
   <section class="panel" id="p-credentials">
@@ -268,6 +298,57 @@ fetch("/api/portal/auth/status").then(function(r){return r.json()}).then(functio
   if(!d.googleConfigured)$("googleBtn").style.display="none";
 }).catch(function(){});
 
+var wallet=null;
+try{wallet=JSON.parse(localStorage.getItem("sentinel_wallet")||"null")}catch(e){}
+function walletAvailable(){return !!(window.ethereum&&window.ethereum.request)}
+function claimMessage(chainId,address){
+  return "Solvency Sentinel — I control the Aave V3 position on "+chainName(chainId)+" (chain id "+chainId+") at "+address+".";
+}
+function walletMsg(t,cls){var m=$("walletMsg");if(m){m.className="msg "+cls;m.textContent=t}}
+function renderWallets(){
+  var connected=wallet&&wallet.address;
+  $("walletAddr").textContent=connected?wallet.address:"No wallet connected";
+  $("walletNet").textContent=connected?(chainName(wallet.chainId)+" · network id "+wallet.chainId):"Connect a browser wallet (e.g. MetaMask) to get started.";
+  $("walletConnectBtn").style.display=walletAvailable()?"inline-flex":"none";
+  $("walletDisconnectBtn").style.display=connected?"inline-flex":"none";
+  $("walletClaimBtn").disabled=!connected;
+  $("walletClaimMsg").textContent=connected?claimMessage(wallet.chainId,wallet.address):"connect a wallet first";
+}
+$("walletConnectBtn").addEventListener("click",function(){
+  if(!walletAvailable()){walletMsg("No browser wallet found (MetaMask or similar).","err");return}
+  window.ethereum.request({method:"eth_requestAccounts"}).then(function(accs){
+    return window.ethereum.request({method:"eth_chainId"}).then(function(cid){
+      wallet={address:accs[0].toLowerCase(),chainId:parseInt(cid,16).toString()};
+      localStorage.setItem("sentinel_wallet",JSON.stringify(wallet));
+      renderWallets();walletMsg("","ok");
+    });
+  }).catch(function(e){walletMsg("Wallet connection failed or cancelled: "+(e.message||String(e)),"err")});
+});
+$("walletDisconnectBtn").addEventListener("click",function(){
+  wallet=null;localStorage.removeItem("sentinel_wallet");renderWallets();
+});
+$("walletClaimBtn").addEventListener("click",function(){
+  if(!wallet)return;
+  $("walletClaimBtn").disabled=true;
+  walletMsg("","ok");
+  var msg=claimMessage(wallet.chainId,wallet.address);
+  window.ethereum.request({method:"personal_sign",params:[msg,wallet.address]}).then(function(sig){
+    return api("/api/register-position",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chainId:wallet.chainId,address:wallet.address,message:msg,signature:sig})}).then(function(r){
+      $("walletClaimBtn").disabled=false;
+      if(r.d.ok){walletMsg("Ownership verified. Position added — see Overview.","ok");setTab("overview");return loadMe()}
+      walletMsg(r.d.error||"Registration failed.","err");
+    });
+  }).catch(function(e){$("walletClaimBtn").disabled=false;walletMsg("Signing failed or cancelled: "+(e.message||String(e)),"err")});
+});
+if(window.ethereum&&window.ethereum.on){
+  window.ethereum.on("chainChanged",function(cid){
+    if(wallet){wallet.chainId=parseInt(cid,16).toString();localStorage.setItem("sentinel_wallet",JSON.stringify(wallet));renderWallets()}
+  });
+  window.ethereum.on("accountsChanged",function(accs){
+    if(!accs||!accs[0]){wallet=null;localStorage.removeItem("sentinel_wallet");renderWallets()}
+  });
+}
+
 function loadMe(){
   return api("/api/portal/me").then(function(r){
     if(r.status===401){showAuth();return null}
@@ -275,7 +356,7 @@ function loadMe(){
     showApp();
     $("navEmail").textContent=state.user.email;
     $("pageSub").textContent="Welcome back — "+state.user.email;
-    renderOverview();renderCredentials();renderAgents();renderPlugins();renderActivity();
+    renderOverview();renderWallets();renderCredentials();renderAgents();renderPlugins();renderActivity();
     return state;
   }).catch(function(e){
     $("pageSub").textContent="Failed to load: "+e.message;
@@ -290,7 +371,7 @@ function renderOverview(){
   $("statApprovals").textContent=pend.length;
   $("statActivity").textContent=state.activity.length;
   var el=$("posList");
-  if(!state.positions.length){el.innerHTML='<div class="empty">No claimed positions yet. Claim one on the landing page.</div>';return}
+  if(!state.positions.length){el.innerHTML='<div class="empty">No claimed positions yet. Connect a wallet in the Wallets tab to prove ownership.</div>';return}
   el.innerHTML=state.positions.map(function(p){
     var idx=state.positions.indexOf(p);
     return '<div class="row"><div class="info"><div class="t">'+chainName(p.chainId)+' <span class="hf" id="hf'+idx+'"></span></div>'+
