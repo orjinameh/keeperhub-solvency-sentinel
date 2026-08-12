@@ -146,7 +146,7 @@ async function runHttp(port: number, token: string): Promise<void> {
     next();
   };
 
-  const openSession: express.RequestHandler = async (req, res) => {
+  const openSession = async (req: express.Request, res: express.Response): Promise<void> => {
     const server = buildServer();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomBytes(16).toString("hex"),
