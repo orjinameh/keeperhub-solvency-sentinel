@@ -7,20 +7,25 @@ const FAKE_USER = "0x1234567890abcdef1234567890abcdef12345678";
 
 export interface DryRunScenario {
   healthFactor?: number;
+  healthFactorAfter?: number;
   collateralUsd?: number;
   debtUsd?: number;
   debtAsset?: string;
   executionId?: string;
+  replay?: boolean;
 }
 
 export function dryRunOps(scenario: DryRunScenario = {}): KeeperHubOps {
   const hf = scenario.healthFactor ?? 1.02;
+  const healthFactorAfter = scenario.healthFactorAfter ?? Math.max(2, hf * 20);
   const collateralUsd = scenario.collateralUsd ?? 1000;
   const debtUsd = scenario.debtUsd ?? 800;
   const debtAsset = scenario.debtAsset ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+  const replay = scenario.replay ?? false;
   const chain = getAaveChain("84532");
+  let healed = false;
 
-  const fakeAccount = (user: string): AccountData => {
+  const fakeAccount = (user: string, hfValue: number): AccountData => {
     const account = {
       user,
       chain,
@@ -29,15 +34,15 @@ export function dryRunOps(scenario: DryRunScenario = {}): KeeperHubOps {
       availableBorrowsBase: 0n,
       currentLiquidationThreshold: 8000n,
       ltv: 7500n,
-      healthFactor: BigInt(Math.round(hf * 1e18)),
-      healthFactorNumber: hf,
+      healthFactor: BigInt(Math.round(hfValue * 1e18)),
+      healthFactorNumber: hfValue,
     };
     return account;
   };
 
   return {
     async readAccountData(_chain, user) {
-      return fakeAccount(user);
+      return healed ? fakeAccount(user, healthFactorAfter) : fakeAccount(user, hf);
     },
     async findBorrows() {
       return [
@@ -63,12 +68,13 @@ export function dryRunOps(scenario: DryRunScenario = {}): KeeperHubOps {
       };
     },
     async executeContractCall(_req, taskId) {
+      if (!replay) healed = true;
       return {
         executionId: scenario.executionId ?? `direct_dry_${Math.floor(Math.random() * 1e6)}`,
         status: "completed",
         transactionHash: `0x${"d".repeat(64)}`,
         transactionLink: "https://sepolia.basescan.org/tx/0x" + "d".repeat(64),
-        idempotentReplay: false,
+        idempotentReplay: replay,
         taskId,
       };
     },

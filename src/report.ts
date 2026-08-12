@@ -31,6 +31,7 @@ export function toMarkdown(r: SentinelRunReport): string {
     lines.push(``);
   }
   lines.push(`- **Task**: \`${r.taskId}\``);
+  lines.push(`- **Run**: \`${r.runId}\``);
   lines.push(`- **Chain**: ${r.chainId}`);
   lines.push(`- **User (protected)**: \`${r.user}\``);
   lines.push(`- **Started**: ${r.startedAt}`);

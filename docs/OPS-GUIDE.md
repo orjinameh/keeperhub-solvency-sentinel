@@ -79,6 +79,16 @@ protecting the position.
   (`0x3e9708d80f7B3e43118013075F7e95CE3AB31F31`) instead.
 - KeeperHub's contract-call `value` field is in **ether units** (e.g. `"0.04"`),
   not wei.
+- **KeeperHub's idempotency replay window is 24h.** Re-running the same command
+  with the same task id, asset and amount inside that window returns the *old*
+  execution (`idempotentReplay: true`) instead of sending a new transaction —
+  the position is **not** rescued, even though the API says "completed". We got
+  burned by this on the live demo: a second monitor run printed "TX CONFIRMED"
+  with the previous tx hash while HF was still 1.32. Fixed two ways: (1) every
+  monitor run derives a fresh `runId` and folds it into the idempotency key, so
+  each invocation lands a new execution; (2) the sentinel now re-reads the
+  health factor after every broadcast (`verify-position`) and reports **NOT
+  rescued** — never "TX CONFIRMED" — if HF is still below critical.
 
 ## Sanity checks if something fails
 

@@ -56,3 +56,37 @@ test("full loop (dry-run): liquidatable HF acts even though below 1", async () =
   assert.equal(report.decision.shouldAct, true);
   assert.ok(report.execution);
 });
+
+test("post-check: after a real repay the position is re-read and verified healed", async () => {
+  const report = await runSentinel({
+    chainId: "84532",
+    user: "0x1234567890abcdef1234567890abcdef12345678",
+    policy: { criticalHf: 1.05, targetHf: 1.5 },
+    taskId: "sentinel-e2e-healed",
+    confirm: false,
+    dryRun: true,
+    ops: dryRunOps({ healthFactor: 1.02, healthFactorAfter: 18.4 }),
+  });
+  const vp = report.steps.find((s) => s.name === "verify-position");
+  assert.ok(vp, "expected a verify-position post-check step");
+  assert.equal(vp.ok, true);
+  assert.match(vp.detail, /18\.4000/);
+  assert.ok(report.runId);
+});
+
+test("post-check: a stale idempotent replay that moved nothing is NOT reported as rescued", async () => {
+  const report = await runSentinel({
+    chainId: "84532",
+    user: "0x1234567890abcdef1234567890abcdef12345678",
+    policy: { criticalHf: 1.05, targetHf: 1.5 },
+    taskId: "sentinel-e2e-replay",
+    confirm: false,
+    dryRun: true,
+    ops: dryRunOps({ healthFactor: 1.02, replay: true }),
+  });
+  const vp = report.steps.find((s) => s.name === "verify-position");
+  assert.ok(vp, "expected a verify-position post-check step");
+  assert.equal(vp.ok, false);
+  assert.equal(report.execution?.idempotentReplay, true);
+  assert.match(vp.detail, /stale idempotent replay/);
+});

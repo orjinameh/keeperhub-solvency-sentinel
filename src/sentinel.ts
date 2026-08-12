@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { randomBytes } from "node:crypto";
 import { getAaveChain } from "./aave/chains.ts";
 import { decideAction, formatAccountData, type SentinelPolicy } from "./aave/health.ts";
 import { findBorrows, readAccountData, readTokenAllowance, readTokenBalance } from "./aave/position.ts";
@@ -39,6 +40,7 @@ export interface SentinelRunOptions {
   user: string;
   policy: SentinelPolicy;
   taskId: string;
+  runId?: string;
   confirm: boolean;
   dryRun?: boolean;
   ops?: KeeperHubOps;
@@ -54,6 +56,7 @@ export interface SentinelStep {
 
 export interface SentinelRunReport {
   taskId: string;
+  runId: string;
   chainId: string;
   user: string;
   startedAt: string;
@@ -92,7 +95,8 @@ export async function runSentinel(opts: SentinelRunOptions): Promise<SentinelRun
   const chain = getAaveChain(opts.chainId);
   const steps: SentinelStep[] = [];
   const startedAt = new Date().toISOString();
-  log(opts, `[sentinel] task=${opts.taskId} chain=${chain.name} (${chain.chainId}) user=${opts.user}${opts.dryRun ? " [DRY RUN]" : ""}`);
+  const runId = opts.runId ?? randomBytes(6).toString("hex");
+  log(opts, `[sentinel] task=${opts.taskId} run=${runId} chain=${chain.name} (${chain.chainId}) user=${opts.user}${opts.dryRun ? " [DRY RUN]" : ""}`);
 
   const account = await ops.readAccountData(chain, opts.user);
   steps.push({
@@ -113,6 +117,8 @@ export async function runSentinel(opts: SentinelRunOptions): Promise<SentinelRun
   log(opts, `[sentinel] decision=${decision.level} act=${decision.shouldAct} — ${decision.reason}`);
 
   let execution: SentinelRunReport["execution"];
+  let rescued = false;
+  let postHf: number | null = null;
   if (decision.shouldAct) {
     const borrows = await ops.findBorrows(chain, opts.user);
     const debtAsset = borrows[0];
@@ -180,7 +186,7 @@ export async function runSentinel(opts: SentinelRunOptions): Promise<SentinelRun
             data: approveSim,
           });
           if (approveSim.success !== true) throw new Error(`approve simulation failed for ${debtAsset.asset}`);
-          const approveResult = await ops.executeContractCall(approveReq, `${opts.taskId}|approve`);
+          const approveResult = await ops.executeContractCall(approveReq, `${opts.taskId}|${runId}|approve`);
           steps.push({
             name: "execute-approve",
             ok: approveResult.status === "completed",
@@ -210,7 +216,7 @@ export async function runSentinel(opts: SentinelRunOptions): Promise<SentinelRun
           throw new Error(`Simulation failed — treating as hard stop (per KeeperHub safe-first-write sequence).`);
         }
 
-        const repayTaskId = `${opts.taskId}|repay`;
+        const repayTaskId = `${opts.taskId}|${runId}|repay`;
         const idempotencyKey = deriveIdempotencyKey({
           taskId: repayTaskId,
           chainId: chain.chainId,
@@ -218,7 +224,7 @@ export async function runSentinel(opts: SentinelRunOptions): Promise<SentinelRun
           amount: "0",
           extras: { fn: "repay", args: JSON.stringify([debtAsset.asset, repayAmount, 2, opts.user]) },
         });
-        log(opts, `[sentinel] idempotency-key=${idempotencyKey.slice(0, 16)}…`);
+        log(opts, `[sentinel] idempotency-key=${idempotencyKey.slice(0, 16)}… (run-scoped, unique per invocation)`);
 
         if (opts.confirm) {
           const ok = await confirmRepay(debtAsset.asset, decision);
@@ -231,12 +237,26 @@ export async function runSentinel(opts: SentinelRunOptions): Promise<SentinelRun
         } else {
           execution = await broadcastAndWait(repayReq, repayTaskId, steps, opts);
         }
+
+        if (execution) {
+          const post = await ops.readAccountData(chain, opts.user);
+          postHf = post.healthFactorNumber;
+          rescued = post.healthFactorNumber >= opts.policy.criticalHf;
+          steps.push({
+            name: "verify-position",
+            ok: rescued,
+            detail: `HF ${account.healthFactorNumber.toFixed(4)} -> ${post.healthFactorNumber.toFixed(4)}${execution.idempotentReplay ? " (stale idempotent replay — no new on-chain write)" : ""}`,
+            data: { ...formatAccountData(post), idempotentReplay: execution.idempotentReplay ?? false },
+          });
+          log(opts, `[sentinel] post-check: HF ${account.healthFactorNumber.toFixed(4)} -> ${post.healthFactorNumber.toFixed(4)} ${rescued ? "RESCUED" : "STILL CRITICAL"}${execution.idempotentReplay ? " (idempotent replay)" : ""}`);
+        }
       }
     }
   }
 
   const report: SentinelRunReport = {
     taskId: opts.taskId,
+    runId,
     chainId: opts.chainId,
     user: opts.user,
     startedAt,
@@ -249,7 +269,11 @@ export async function runSentinel(opts: SentinelRunOptions): Promise<SentinelRun
   };
 
   if (execution?.transactionLink) {
-    log(opts, `[sentinel] TX CONFIRMED: ${execution.transactionLink}`);
+    if (rescued) {
+      log(opts, `[sentinel] TX CONFIRMED: ${execution.transactionLink}`);
+    } else {
+      log(opts, `[sentinel] WARNING: execution completed (${execution.transactionLink}) but HF ${postHf === null ? "?" : postHf.toFixed(4)} is still below critical — position NOT rescued`);
+    }
   } else if (execution) {
     log(opts, `[sentinel] execution completed: ${execution.executionId}`);
   }

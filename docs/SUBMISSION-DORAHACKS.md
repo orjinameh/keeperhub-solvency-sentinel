@@ -27,13 +27,17 @@ guarantees**. That is the entire thesis of this build:
   and machine-readable codes (`insufficient_balance` carries `balanceWei`,
   `requiredWei`, `shortfallWei`). A simulation that would revert is a hard stop —
   nothing is ever signed blind.
-- **No double-execution.** Broadcasts carry an `Idempotency-Key` derived as the
-  SHA-256 of a canonical `taskId|chainId|address|amount|effect-fields` string, so
-  a retry after a crash or timeout returns the *same* execution instead of
-  sending a second transaction. A `409 idempotency_conflict` is treated as an
-  answer, not an error: the agent polls `originalExecutionId` to learn the real
-  outcome. Watch-mode keys include a time bucket + cycle number so the 24-hour
-  replay window can never swallow a repeated job.
+- **No double-execution, no ghost rescues.** Broadcasts carry an
+  `Idempotency-Key` derived as the SHA-256 of a canonical
+  `taskId|runId|chainId|address|amount|effect-fields` string. The `runId` is
+  unique per invocation, so a fresh run always lands a fresh execution — a stale
+  replay inside KeeperHub's 24-hour replay window can never swallow a repeated
+  job — while in-process retries reuse the same key and return the *same*
+  execution instead of sending a second transaction. Every broadcast is followed
+  by a `verify-position` post-check that re-reads the health factor on-chain:
+  if it is still below the critical threshold the run is reported as **NOT
+  rescued**. The agent never prints "TX CONFIRMED" for a replay that moved
+  nothing.
 - **No MEV surprises.** KeeperHub controls gas (gas limit multiplier, gas
   management, optional sponsorship via relayer/Safe paths); the agent verifies
   the `sponsored` flag and never assumes the EOA nonce moved.
