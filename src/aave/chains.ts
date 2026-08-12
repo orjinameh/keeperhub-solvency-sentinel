@@ -6,6 +6,8 @@ export interface AaveChain {
   addressesProvider: string;
   dataProvider: string;
   explorer: string;
+  rpc: string;
+  rpcFallback: string;
 }
 
 export const AAVE_CHAINS: Record<string, AaveChain> = {
@@ -17,6 +19,8 @@ export const AAVE_CHAINS: Record<string, AaveChain> = {
     addressesProvider: "0xE4C23309117Aa30342BFaae6c95c6478e0A4Ad00",
     dataProvider: "0xBc9f5b7E248451CdD7cA54e717a2BFe1F32b566b",
     explorer: "https://sepolia.basescan.org",
+    rpc: "https://sepolia.base.org",
+    rpcFallback: "https://base-sepolia-rpc.publicnode.com",
   },
   "11155111": {
     chainId: "11155111",
@@ -26,6 +30,8 @@ export const AAVE_CHAINS: Record<string, AaveChain> = {
     addressesProvider: "0x012bAC54348C0E635dCAc9D5FB99f06F24136C9A",
     dataProvider: "0x3e9708d80f7B3e43118013075F7e95CE3AB31F31",
     explorer: "https://sepolia.etherscan.io",
+    rpc: "https://ethereum-sepolia-rpc.publicnode.com",
+    rpcFallback: "https://rpc.sepolia.org",
   },
   "8453": {
     chainId: "8453",
@@ -35,6 +41,8 @@ export const AAVE_CHAINS: Record<string, AaveChain> = {
     addressesProvider: "0xe20fCBdBfFC4Dd138cE8b2E6FBb6Cb49777ad64D",
     dataProvider: "0x2d8A3C5677189723C4cB8873CfC9C8976FDF38Ac",
     explorer: "https://basescan.org",
+    rpc: "https://mainnet.base.org",
+    rpcFallback: "https://base-rpc.publicnode.com",
   },
   "42161": {
     chainId: "42161",
@@ -44,6 +52,8 @@ export const AAVE_CHAINS: Record<string, AaveChain> = {
     addressesProvider: "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb",
     dataProvider: "0x69FA688f1Dc47d4B5d8029D5a35FB7a548310654",
     explorer: "https://arbiscan.io",
+    rpc: "https://arb1.arbitrum.io/rpc",
+    rpcFallback: "https://arbitrum-rpc.publicnode.com",
   },
   "137": {
     chainId: "137",
@@ -53,6 +63,8 @@ export const AAVE_CHAINS: Record<string, AaveChain> = {
     addressesProvider: "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb",
     dataProvider: "0x69FA688f1Dc47d4B5d8029D5a35FB7a548310654",
     explorer: "https://polygonscan.com",
+    rpc: "https://polygon-rpc.com",
+    rpcFallback: "https://polygon-rpc.publicnode.com",
   },
   "1": {
     chainId: "1",
@@ -62,6 +74,8 @@ export const AAVE_CHAINS: Record<string, AaveChain> = {
     addressesProvider: "0x2f39d218133AFaB8F2B819B1066c7E434Ad94E9e",
     dataProvider: "0x41393e5e337606dc3821075Af65AeE84D7688CBD",
     explorer: "https://etherscan.io",
+    rpc: "https://ethereum-rpc.publicnode.com",
+    rpcFallback: "https://eth.llamarpc.com",
   },
 };
 

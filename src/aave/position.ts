@@ -1,7 +1,40 @@
-import { decodeAbiParameters } from "viem";
-import { executeContractCall, simulateContractCall } from "../keeperhub/client.ts";
+import { decodeAbiParameters, createPublicClient, fallback, http } from "viem";
+import {
+  arbitrum,
+  base,
+  baseSepolia,
+  mainnet,
+  polygon,
+  sepolia,
+  type Chain as ViemChain,
+} from "viem/chains";
+import { simulateContractCall } from "../keeperhub/client.ts";
 import type { AaveChain } from "./chains.ts";
 import { DATA_PROVIDER_ABI, ERC20_ABI, POOL_ABI } from "./abi.ts";
+
+const VIEM_CHAINS: Record<string, ViemChain> = {
+  "1": mainnet,
+  "137": polygon,
+  "8453": base,
+  "84532": baseSepolia,
+  "42161": arbitrum,
+  "11155111": sepolia,
+};
+
+const clients = new Map<string, ReturnType<typeof createPublicClient>>();
+
+function publicClient(chain: AaveChain) {
+  let client = clients.get(chain.chainId);
+  if (!client) {
+    const transport = fallback(
+      [http(chain.rpc), http(chain.rpcFallback)],
+      { retryCount: 1 }
+    );
+    client = createPublicClient({ chain: VIEM_CHAINS[chain.chainId], transport });
+    clients.set(chain.chainId, client);
+  }
+  return client;
+}
 
 export interface AccountData {
   user: string;
@@ -47,15 +80,14 @@ export function decodeResult<T extends readonly unknown[]>(result: unknown, outp
 }
 
 export async function readAccountData(chain: AaveChain, user: string): Promise<AccountData> {
-  const result = await executeContractCall({
-    chainId: chain.chainId,
-    contractAddress: chain.pool,
-    functionName: "getUserAccountData",
-    functionArgs: JSON.stringify([user]),
-    abi: POOL_ABI,
-  });
+  const client = publicClient(chain);
   const [totalCollateralBase, totalDebtBase, availableBorrowsBase, currentLiquidationThreshold, ltv, healthFactor] =
-    decodeResult<[bigint, bigint, bigint, bigint, bigint, bigint]>(result.result, POOL_ABI[0].outputs);
+    await client.readContract({
+      address: chain.pool as `0x${string}`,
+      abi: POOL_ABI,
+      functionName: "getUserAccountData",
+      args: [user as `0x${string}`],
+    });
   return {
     user,
     chain,
@@ -70,31 +102,24 @@ export async function readAccountData(chain: AaveChain, user: string): Promise<A
 }
 
 export async function readReservesList(chain: AaveChain): Promise<string[]> {
-  const result = await executeContractCall({
-    chainId: chain.chainId,
-    contractAddress: chain.pool,
-    functionName: "getReservesList",
+  const client = publicClient(chain);
+  const reserves = await client.readContract({
+    address: chain.pool as `0x${string}`,
     abi: POOL_ABI,
+    functionName: "getReservesList",
   });
-  return decodeResult<string[]>(result.result, POOL_ABI[2].outputs);
+  return Array.from(reserves);
 }
 
 export async function readReserveData(chain: AaveChain, asset: string, user: string): Promise<ReserveData> {
-  const result = await executeContractCall({
-    chainId: chain.chainId,
-    contractAddress: chain.dataProvider,
-    functionName: "getUserReserveData",
-    functionArgs: JSON.stringify([asset, user]),
+  const client = publicClient(chain);
+  const [currentATokenBalance, currentStableDebt, currentVariableDebt] = await client.readContract({
+    address: chain.dataProvider as `0x${string}`,
     abi: DATA_PROVIDER_ABI,
+    functionName: "getUserReserveData",
+    args: [asset as `0x${string}`, user as `0x${string}`],
   });
-  const named = result.result as Record<string, string | undefined>;
-  const field = (name: string): bigint => BigInt(named[name] ?? "0");
-  return {
-    asset,
-    currentATokenBalance: field("currentATokenBalance"),
-    currentStableDebt: field("currentStableDebt"),
-    currentVariableDebt: field("currentVariableDebt"),
-  };
+  return { asset, currentATokenBalance, currentStableDebt, currentVariableDebt };
 }
 
 export interface BorrowPosition {
@@ -116,37 +141,32 @@ export async function findBorrows(chain: AaveChain, user: string): Promise<Borro
 }
 
 export async function readTokenBalance(chain: AaveChain, token: string, holder: string): Promise<bigint> {
-  const result = await executeContractCall({
-    chainId: chain.chainId,
-    contractAddress: token,
-    functionName: "balanceOf",
-    functionArgs: JSON.stringify([holder]),
+  const client = publicClient(chain);
+  return client.readContract({
+    address: token as `0x${string}`,
     abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: [holder as `0x${string}`],
   });
-  const [balance] = decodeResult<[bigint]>(result.result, ERC20_ABI[0].outputs);
-  return balance;
 }
 
 export async function readTokenAllowance(chain: AaveChain, token: string, owner: string, spender: string): Promise<bigint> {
-  const result = await executeContractCall({
-    chainId: chain.chainId,
-    contractAddress: token,
-    functionName: "allowance",
-    functionArgs: JSON.stringify([owner, spender]),
+  const client = publicClient(chain);
+  return client.readContract({
+    address: token as `0x${string}`,
     abi: ERC20_ABI,
+    functionName: "allowance",
+    args: [owner as `0x${string}`, spender as `0x${string}`],
   });
-  const [allowance] = decodeResult<[bigint]>(result.result, ERC20_ABI[4].outputs);
-  return allowance;
 }
 
 export async function readTokenDecimals(chain: AaveChain, token: string): Promise<number> {
-  const result = await executeContractCall({
-    chainId: chain.chainId,
-    contractAddress: token,
-    functionName: "decimals",
+  const client = publicClient(chain);
+  const decimals = await client.readContract({
+    address: token as `0x${string}`,
     abi: ERC20_ABI,
+    functionName: "decimals",
   });
-  const [decimals] = decodeResult<[number]>(result.result, [ERC20_ABI[2].outputs[0]!]);
   return Number(decimals);
 }
 
