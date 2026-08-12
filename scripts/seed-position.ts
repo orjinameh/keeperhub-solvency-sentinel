@@ -8,6 +8,7 @@ import {
   simulateContractCall,
   type ContractCallRequest,
 } from "../src/keeperhub/client.ts";
+import { randomBytes } from "node:crypto";
 
 const WETH = "0xC558DBdd856501FCd9aaF1E62eae57A9F0629a3c";
 const USDC = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8";
@@ -92,8 +93,10 @@ async function main(): Promise<void> {
   const borrow = toUSDC(String(flags.borrow ?? "35"));
   const skipSimulate = flags["skip-simulate"] === true;
   const borrowOnly = flags["borrow-only"] === true;
+  const runId = randomBytes(6).toString("hex");
 
   console.log(`Solvency Sentinel — position seed on ${chain.name} (${chain.chainId})`);
+  console.log(`run=${runId}`);
   console.log(`user=${user}`);
   console.log(`pool=${chain.pool}`);
   console.log(`weth=${WETH}`);
@@ -109,7 +112,7 @@ async function main(): Promise<void> {
       chain.chainId,
       "1/4 wrap ETH -> WETH (WETH.deposit)",
       { chainId: chain.chainId, contractAddress: WETH, functionName: "deposit", functionArgs: "[]", abi: WETH_ABI, value: String(flags.wrap ?? "0.04") },
-      `seed|${user.slice(2, 10)}|wrap|${wrap}`,
+      `seed|${runId}|${user.slice(2, 10)}|wrap|${wrap}`,
       skipSimulate
     );
 
@@ -117,7 +120,7 @@ async function main(): Promise<void> {
       chain.chainId,
       "2/4 approve WETH -> Aave pool",
       { chainId: chain.chainId, contractAddress: WETH, functionName: "approve", functionArgs: JSON.stringify([chain.pool, MAX_UINT256]), abi: ERC20_ABI },
-      `seed|${user.slice(2, 10)}|approve|${chain.pool}`,
+      `seed|${runId}|${user.slice(2, 10)}|approve|${chain.pool}`,
       skipSimulate
     );
 
@@ -125,20 +128,26 @@ async function main(): Promise<void> {
       chain.chainId,
       "3/4 supply WETH collateral",
       { chainId: chain.chainId, contractAddress: chain.pool, functionName: "supply", functionArgs: JSON.stringify([WETH, supply, user, 0]), abi: POOL_WRITE_ABI },
-      `seed|${user.slice(2, 10)}|supply|${WETH}|${supply}`,
+      `seed|${runId}|${user.slice(2, 10)}|supply|${WETH}|${supply}`,
       skipSimulate
     );
   }
 
+  const usdcBefore = await readTokenBalance(chain, USDC, user);
   await step(
     chain.chainId,
     "4/4 borrow USDC (variable)",
     { chainId: chain.chainId, contractAddress: chain.pool, functionName: "borrow", functionArgs: JSON.stringify([USDC, borrow, 2, 0, user]), abi: POOL_WRITE_ABI },
-    `seed|${user.slice(2, 10)}|borrow|${USDC}|${borrow}`,
+    `seed|${runId}|${user.slice(2, 10)}|borrow|${USDC}|${borrow}`,
     skipSimulate
   );
 
   const usdcBal = await readTokenBalance(chain, USDC, user);
+  if (usdcBal <= usdcBefore) {
+    console.log(`\nWARNING: USDC balance did not increase (${(Number(usdcBefore) / 1e6).toFixed(6)} -> ${(Number(usdcBal) / 1e6).toFixed(6)}).`);
+    console.log(`The borrow may have been replayed by KeeperHub's 24h idempotency window — the run-scoped key below is unique,`);
+    console.log(`so a fresh run (new runId) will borrow for real. Check execution output above for replay=true.`);
+  }
   console.log(`\nposition seeded. wallet USDC balance now = ${(Number(usdcBal) / 1e6).toFixed(6)}`);
   console.log(`run: npm run check -- --chain ${chain.chainId} --user ${user}`);
   console.log(`protect: npm run monitor -- --chain ${chain.chainId} --user ${user} --critical 1.5 --target 2 --yes`);
