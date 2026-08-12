@@ -68,13 +68,31 @@ function registerTools(s: McpServer, onCall?: (c: TrackCall) => void): McpServer
 
   s.tool(
     "sentinel_check",
-    "Read an Aave V3 position health factor and decide the risk level. Read-only — never broadcasts.",
+    "Read an Aave V3 position health factor and decide the risk level. Read-only — never broadcasts. Only works on positions whose owner has verified ownership (connected the wallet in the Control Room).",
     {
       chainId: z.string().describe("Aave V3 chain id (84532, 11155111, 8453, 42161, 137, 1)"),
       user: z.string().describe("Address of the position to protect"),
     },
     track("sentinel_check", async (args: { chainId: string; user: string }) => {
       const { chainId, user } = args;
+      if (!(await ownsPosition(chainId, user))) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  level: "unverified",
+                  error: `Refusing — ${user} is not a verified position. Only wallets whose owner has connected them and signed the ownership message can be checked. Ask the owner to connect the wallet and verify ownership in the Control Room (Wallets tab), or pass a valid signature to sentinel_register.`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
       const chain = getAaveChain(chainId);
       const account = await readAccountData(chain, user);
       const cfg = getConfig();
@@ -87,7 +105,7 @@ function registerTools(s: McpServer, onCall?: (c: TrackCall) => void): McpServer
 
   s.tool(
     "sentinel_monitor",
-    "Run the Solvency Sentinel protect loop: read position -> evaluate -> preflight simulate -> idempotent broadcast -> poll -> verify. Writes an audit report. A real broadcast is NOT executed until the position owner approves it in the dashboard (Approvals tab) — the tool waits while the approval is pending and reports the decision. Preview first with dryRun: true.",
+    "Run the Solvency Sentinel protect loop: read position -> evaluate -> preflight simulate -> idempotent broadcast -> poll -> verify. Writes an audit report. Only works on positions whose owner has verified ownership (connected the wallet in the Control Room). A real broadcast is NOT executed until the position owner approves it in the dashboard (Approvals tab) — the tool waits while the approval is pending and reports the decision. Preview first with dryRun: true.",
     {
       chainId: z.string().describe("Aave V3 chain id (84532, 11155111, 8453, 42161, 137, 1)"),
       user: z.string().describe("Address of the position to protect"),
@@ -101,7 +119,7 @@ function registerTools(s: McpServer, onCall?: (c: TrackCall) => void): McpServer
         const { chainId, user, criticalHf, targetHf, dryRun } = args;
         const cfg = getConfig();
         const isDryRun = dryRun ?? false;
-        if (!isDryRun && !(await ownsPosition(chainId, user))) {
+        if (!(await ownsPosition(chainId, user))) {
           return {
             content: [
               {
@@ -110,7 +128,7 @@ function registerTools(s: McpServer, onCall?: (c: TrackCall) => void): McpServer
                   {
                     ok: false,
                     level: "unverified",
-                    error: `Refusing to broadcast — no proof that ${user} owns this position. Ownership is verified by a one-time signature from that wallet. Ask the position owner to sign the message on the Solvency Sentinel page (or call sentinel_register), then retry.`,
+                    error: `Refusing — ${user} is not a verified position. Only wallets whose owner has connected them and signed the ownership message can be monitored or rescued. Ask the owner to connect the wallet and verify ownership in the Control Room (Wallets tab), or pass a valid signature to sentinel_register.`,
                   },
                   null,
                   2

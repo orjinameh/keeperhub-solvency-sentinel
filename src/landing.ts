@@ -213,7 +213,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
 <section id="own" style="padding-top:0">
   <div class="wrap">
     <h2>Claim a position you own.</h2>
-    <p class="sec-sub">Previewing is open to anyone. <b>Executing a rescue requires proof of ownership</b> &mdash; one signature from the position&rsquo;s wallet. The sentinel refuses to broadcast against addresses that haven&rsquo;t been claimed.</p>
+    <p class="sec-sub">The sentinel only watches and rescues wallets you&rsquo;ve verified &mdash; <b>one signature from the position&rsquo;s wallet</b>. Unclaimed addresses are refused for checks and broadcasts alike.</p>
     <div class="own">
       <div class="check-row">
         <select id="ownChain">
