@@ -272,6 +272,7 @@ function loadMe(){
   return api("/api/portal/me").then(function(r){
     if(r.status===401){showAuth();return null}
     state=r.d;
+    showApp();
     $("navEmail").textContent=state.user.email;
     $("pageSub").textContent="Welcome back — "+state.user.email;
     renderOverview();renderCredentials();renderAgents();renderPlugins();renderActivity();
