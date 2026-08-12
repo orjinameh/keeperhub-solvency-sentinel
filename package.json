@@ -6,7 +6,7 @@
     "solvency-sentinel": "src/index.ts"
   },
   "scripts": {
-    "start": "node --import tsx/esm src/index.ts",
+    "start": "node --import tsx/esm src/mcp.ts --http",
     "monitor": "node --import tsx/esm src/index.ts monitor",
     "check": "node --import tsx/esm src/index.ts check",
     "atom": "node --import tsx/esm src/index.ts atom",
