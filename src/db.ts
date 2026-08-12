@@ -72,6 +72,7 @@ export interface AgentActivityRec {
 }
 
 export interface Store {
+  readonly kind: "memory" | "mongodb";
   getServerSecret(): Promise<string | null>;
   setServerSecret(secret: string): Promise<void>;
 
@@ -106,6 +107,7 @@ export interface Store {
 /* ------------------------------------------------------------------ */
 
 class MemoryStore implements Store {
+  readonly kind = "memory" as const;
   private users: User[] = [];
   private positions: OwnedPositionRec[] = [];
   private credentials: CredentialRec[] = [];
@@ -217,6 +219,7 @@ class MemoryStore implements Store {
 /* ------------------------------------------------------------------ */
 
 class MongoStore implements Store {
+  readonly kind = "mongodb" as const;
   private constructor(private db: { collection(name: string): Collection<Document> }) {}
 
   static async connect(uri: string): Promise<MongoStore> {

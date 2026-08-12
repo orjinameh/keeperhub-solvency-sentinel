@@ -239,8 +239,9 @@ async function runHttp(port: number, token: string): Promise<void> {
   }
   const sessions = new Map<string, Session>();
 
-  app.get("/healthz", (_req, res) => {
-    res.json({ ok: true });
+  app.get("/healthz", async (_req, res) => {
+    const store = await getStore();
+    res.json({ ok: true, store: store.kind, mongoUriSet: !!process.env.MONGODB_URI });
   });
 
   app.get("/", (_req, res) => {
