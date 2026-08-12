@@ -81,6 +81,10 @@ npm run atom     -- --check-contract 0x… --check-fn balanceOf --value 0 \
                     --action-fn transfer --action-args '["0x…","1000000"]' --simulate
 npm run status   -- direct_123                    # poll an execution to terminal
 npm run monitor  -- --user 0x… --dry-run          # whole loop locally, no API key
+
+# Open a real Aave V3 position on Ethereum Sepolia entirely through KeeperHub
+# (wrap ETH -> WETH, approve the pool, supply WETH, borrow USDC):
+node --import tsx/esm scripts/seed-position.ts
 ```
 
 `monitor` simulates the repay, asks you to type `repay` to confirm, then
@@ -129,6 +133,20 @@ Aave V3 pool addresses are pinned per chain (from `@bgd-labs/aave-address-book`)
 
 ## Proof of live transactions
 
-> Populated during the demo: each broadcast step writes `executionId`,
-> `transactionHash`, explorer `transactionLink`, and the verified receipts into
-> `docs/runs/`. See the latest run report.
+Live end-to-end run on **Ethereum Sepolia** (chain 11155111), every write through
+the KeeperHub execution API:
+
+| step | action | tx (sepolia.etherscan.io/tx/) |
+| --- | --- | --- |
+| 1 | wrap 0.04 ETH → WETH (`WETH.deposit`, payable) | `0xd88c9f06bd7ec93d5c8d62603e655efed444289dc08bed5fc85d088c552315e7` (block 11469909) |
+| 2 | approve WETH → Aave pool | `0x560a379bfefcbdcd2b10b12d1ee98d697463c6a4785035a7237bd7a746bf8383` |
+| 3 | supply 0.02 WETH collateral | `0x8466b1132dd4cf20837f88be36a3057a8c5464f1d46ad76222d8bf42614de17a` |
+| 4 | borrow 50 USDC (variable) | `0x6e5ea1541be4ce616bccf4a69c1b522030ba6e746dea5dcf3d8243495ff19ed7`, `0xb7515de81ea544c70b0c407ef1f30ff96facd45d8e955714a5799ea799ed6275` |
+| 5 | **sentinel rescue**: HF 1.320 < critical 1.5 → approve USDC → repay 50 USDC | approve `0xae8725b8818e616cb55ff06f7698f601cc3f11717bc0616b0d74c3ad82e50f4b` · repay `0x1c5eae2e1a4c90b54b8573efd78733a1a482b77223128d55e722e2fa5a1f1348` (block 11469993) |
+| 6 | post-rescue health factor | **1.320 → 106,623.59**, debt $50 → $0.00 |
+
+Full audit trail: [`docs/runs/sentinel-monitor-4856C803-2026-08-12T01-34-03-644Z.json`](docs/runs/sentinel-monitor-4856C803-2026-08-12T01-34-03-644Z.json).
+The repay was KeeperHub-sponsored (`sponsored: true`), simulated first (gas
+193,203, `wouldRevert: false`), broadcast with a derived `Idempotency-Key`, and
+verified via the status endpoint's on-chain receipt (`receiptStatus success`).
+Reproduction steps: `docs/OPS-GUIDE.md`.

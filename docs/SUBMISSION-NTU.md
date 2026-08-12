@@ -69,6 +69,12 @@ Best Student ($1.5K) eligible — solo student builder. $20K main pool for the
 strongest web3/AI-agent application.
 
 ## Submission assets
-- GitHub repo (public, to be pushed)
+- GitHub repo (public): https://github.com/orjinameh/keeperhub-solvency-sentinel
 - Demo video (see `docs/VIDEO.md`)
-- Real on-chain tx link from `docs/runs/` (to be filled after live run)
+- **Real on-chain tx executed via KeeperHub**:
+  https://sepolia.etherscan.io/tx/0x1c5eae2e1a4c90b54b8573efd78733a1a482b77223128d55e722e2fa5a1f1348
+  (Ethereum Sepolia — the sentinel detected health factor 1.320 below its
+  critical 1.5 policy, auto-approved the debt asset and repaid 50 USDC on Aave
+  V3. Receipt verified at block 11469993, `receiptStatus success`. Full audit
+  trail: `docs/runs/sentinel-monitor-4856C803-2026-08-12T01-34-03-644Z.json`;
+  post-rescue health factor 106,623.59, debt $0.00.)

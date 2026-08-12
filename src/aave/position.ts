@@ -1,7 +1,7 @@
 import { decodeAbiParameters } from "viem";
 import { executeContractCall, simulateContractCall } from "../keeperhub/client.ts";
 import type { AaveChain } from "./chains.ts";
-import { ERC20_ABI, POOL_ABI } from "./abi.ts";
+import { DATA_PROVIDER_ABI, ERC20_ABI, POOL_ABI } from "./abi.ts";
 
 export interface AccountData {
   user: string;
@@ -20,16 +20,27 @@ export interface ReserveData {
   currentATokenBalance: bigint;
   currentStableDebt: bigint;
   currentVariableDebt: bigint;
-  liquidityRate: bigint;
-  stableRate: bigint;
-  variableRate: bigint;
 }
 
 export function decodeResult<T extends readonly unknown[]>(result: unknown, outputs: readonly unknown[]): T {
-  if (typeof result === "string" && /^0x/i.test(result)) {
-    return decodeAbiParameters(outputs as any, result as `0x${string}`) as T;
+  const outNames = (outputs as readonly { name?: string }[]).map((o) => o.name);
+  if (typeof result === "string") {
+    if (/^0x/i.test(result)) {
+      return decodeAbiParameters(outputs as any, result as `0x${string}`) as T;
+    }
+    if (/^\d+$/.test(result.trim())) {
+      return [BigInt(result.trim())] as unknown as T;
+    }
   }
   if (Array.isArray(result)) {
+    return result as unknown as T;
+  }
+  if (typeof result === "object" && result !== null) {
+    const named = result as Record<string, unknown>;
+    const names = outNames.filter((n): n is string => !!n);
+    if (names.length > 0 && names.every((n) => n in named)) {
+      return names.map((n) => named[n]) as unknown as T;
+    }
     return result as unknown as T;
   }
   throw new Error(`Cannot decode contract call result: ${JSON.stringify(result)}`);
@@ -71,14 +82,19 @@ export async function readReservesList(chain: AaveChain): Promise<string[]> {
 export async function readReserveData(chain: AaveChain, asset: string, user: string): Promise<ReserveData> {
   const result = await executeContractCall({
     chainId: chain.chainId,
-    contractAddress: chain.pool,
+    contractAddress: chain.dataProvider,
     functionName: "getUserReserveData",
     functionArgs: JSON.stringify([asset, user]),
-    abi: POOL_ABI,
+    abi: DATA_PROVIDER_ABI,
   });
-  const [currentATokenBalance, currentStableDebt, currentVariableDebt, liquidityRate, stableRate, variableRate] =
-    decodeResult<[bigint, bigint, bigint, bigint, bigint, bigint]>(result.result, POOL_ABI[1].outputs);
-  return { asset, currentATokenBalance, currentStableDebt, currentVariableDebt, liquidityRate, stableRate, variableRate };
+  const named = result.result as Record<string, string | undefined>;
+  const field = (name: string): bigint => BigInt(named[name] ?? "0");
+  return {
+    asset,
+    currentATokenBalance: field("currentATokenBalance"),
+    currentStableDebt: field("currentStableDebt"),
+    currentVariableDebt: field("currentVariableDebt"),
+  };
 }
 
 export interface BorrowPosition {
@@ -109,6 +125,18 @@ export async function readTokenBalance(chain: AaveChain, token: string, holder: 
   });
   const [balance] = decodeResult<[bigint]>(result.result, ERC20_ABI[0].outputs);
   return balance;
+}
+
+export async function readTokenAllowance(chain: AaveChain, token: string, owner: string, spender: string): Promise<bigint> {
+  const result = await executeContractCall({
+    chainId: chain.chainId,
+    contractAddress: token,
+    functionName: "allowance",
+    functionArgs: JSON.stringify([owner, spender]),
+    abi: ERC20_ABI,
+  });
+  const [allowance] = decodeResult<[bigint]>(result.result, ERC20_ABI[4].outputs);
+  return allowance;
 }
 
 export async function readTokenDecimals(chain: AaveChain, token: string): Promise<number> {

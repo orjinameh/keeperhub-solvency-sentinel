@@ -1,6 +1,7 @@
 import type { KeeperHubOps } from "../sentinel.ts";
 import { getAaveChain } from "../aave/chains.ts";
 import type { AccountData } from "../aave/position.ts";
+import { MAX_UINT256 } from "../aave/abi.ts";
 
 const FAKE_USER = "0x1234567890abcdef1234567890abcdef12345678";
 
@@ -42,6 +43,12 @@ export function dryRunOps(scenario: DryRunScenario = {}): KeeperHubOps {
       return [
         { asset: debtAsset, stableDebt: 0n, variableDebt: BigInt(Math.round(debtUsd * 1e6)) },
       ];
+    },
+    async readTokenBalance() {
+      return BigInt(Math.round(debtUsd * 1e6));
+    },
+    async readTokenAllowance() {
+      return BigInt(Math.round(debtUsd * 1e6));
     },
     async simulateContractCall(req) {
       return {

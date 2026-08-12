@@ -1,8 +1,8 @@
 import { createInterface } from "node:readline";
 import { getAaveChain } from "./aave/chains.ts";
 import { decideAction, formatAccountData, type SentinelPolicy } from "./aave/health.ts";
-import { findBorrows, readAccountData } from "./aave/position.ts";
-import { MAX_UINT256, POOL_ABI } from "./aave/abi.ts";
+import { findBorrows, readAccountData, readTokenAllowance, readTokenBalance } from "./aave/position.ts";
+import { ERC20_ABI, MAX_UINT256, POOL_ABI } from "./aave/abi.ts";
 import {
   executeContractCall,
   pollUntilTerminal,
@@ -17,6 +17,8 @@ import type { AccountData } from "./aave/position.ts";
 export interface KeeperHubOps {
   readAccountData(chain: AaveChain, user: string): Promise<AccountData>;
   findBorrows(chain: AaveChain, user: string): Promise<Array<{ asset: string; stableDebt: bigint; variableDebt: bigint }>>;
+  readTokenBalance(chain: AaveChain, token: string, holder: string): Promise<bigint>;
+  readTokenAllowance(chain: AaveChain, token: string, owner: string, spender: string): Promise<bigint>;
   simulateContractCall(req: ContractCallRequest): Promise<{ success: boolean; gasEstimate?: string; from?: string }>;
   executeContractCall(req: ContractCallRequest, taskId?: string): Promise<{ executionId: string; status: string; idempotentReplay?: boolean }>;
   pollUntilTerminal(id: string): Promise<ExecutionStatusResponse>;
@@ -25,6 +27,8 @@ export interface KeeperHubOps {
 export const realOps: KeeperHubOps = {
   readAccountData,
   findBorrows,
+  readTokenBalance,
+  readTokenAllowance,
   simulateContractCall,
   executeContractCall,
   pollUntilTerminal,
@@ -126,46 +130,107 @@ export async function runSentinel(opts: SentinelRunOptions): Promise<SentinelRun
         detail: `debt asset ${debtAsset.asset} (variable ${debtAsset.variableDebt}, stable ${debtAsset.stableDebt})`,
       });
 
-      const repayReq: ContractCallRequest = {
-        chainId: chain.chainId,
-        contractAddress: chain.pool,
-        functionName: "repay",
-        functionArgs: JSON.stringify([debtAsset.asset, MAX_UINT256, 2, opts.user]),
-        abi: POOL_ABI,
-      };
-
-      log(opts, `[sentinel] preflighting repay simulation (no broadcast)`);
-      const sim = await ops.simulateContractCall(repayReq);
+      const debtWei = debtAsset.variableDebt + debtAsset.stableDebt;
+      const balance = await ops.readTokenBalance(chain, debtAsset.asset, opts.user);
+      const repayAmount = balance >= debtWei ? MAX_UINT256 : balance.toString();
       steps.push({
-        name: "simulate",
-        ok: sim.success === true,
-        detail: `gasEstimate=${sim.gasEstimate} from=${sim.from}`,
-        data: sim,
+        name: "read-repay-balance",
+        ok: balance > 0n,
+        detail: `wallet holds ${balance} ${debtAsset.asset}; debt ${debtWei}; repaying ${repayAmount === MAX_UINT256 ? "full debt (MAX_UINT256)" : `${repayAmount} (capped at wallet balance)`}`,
       });
-      if (sim.success !== true) {
-        throw new Error(`Simulation failed — treating as hard stop (per KeeperHub safe-first-write sequence).`);
-      }
+      log(opts, `[sentinel] debt ${debtWei}, wallet balance ${balance} -> repayAmount ${repayAmount === MAX_UINT256 ? "MAX_UINT256" : repayAmount}`);
+      if (balance <= 0n) {
+        steps.push({
+          name: "find-repay-funds",
+          ok: false,
+          detail: "Wallet holds none of the debt asset — cannot repay.",
+        });
+        log(opts, `[sentinel] WARNING: no ${debtAsset.asset} balance to repay with; skipping broadcast`);
+      } else {
+        const repayReq: ContractCallRequest = {
+          chainId: chain.chainId,
+          contractAddress: chain.pool,
+          functionName: "repay",
+          functionArgs: JSON.stringify([debtAsset.asset, repayAmount, 2, opts.user]),
+          abi: POOL_ABI,
+        };
 
-      const repayTaskId = `${opts.taskId}|repay`;
-      const idempotencyKey = deriveIdempotencyKey({
-        taskId: repayTaskId,
-        chainId: chain.chainId,
-        address: chain.pool,
-        amount: "0",
-        extras: { fn: "repay", args: JSON.stringify([debtAsset.asset, MAX_UINT256, 2, opts.user]) },
-      });
-      log(opts, `[sentinel] idempotency-key=${idempotencyKey.slice(0, 16)}…`);
+        const requiredAllowance = repayAmount === MAX_UINT256 ? debtWei : BigInt(repayAmount);
+        const allowance = await ops.readTokenAllowance(chain, debtAsset.asset, opts.user, chain.pool);
+        steps.push({
+          name: "check-allowance",
+          ok: allowance >= requiredAllowance,
+          detail: `allowance ${allowance}; required ${requiredAllowance}`,
+        });
+        log(opts, `[sentinel] allowance=${allowance} required=${requiredAllowance}`);
+        if (allowance < requiredAllowance) {
+          const approveReq: ContractCallRequest = {
+            chainId: chain.chainId,
+            contractAddress: debtAsset.asset,
+            functionName: "approve",
+            functionArgs: JSON.stringify([chain.pool, MAX_UINT256]),
+            abi: ERC20_ABI,
+          };
+          log(opts, `[sentinel] allowance too low — approving ${debtAsset.asset} for pool (simulate first)`);
+          const approveSim = await ops.simulateContractCall(approveReq);
+          steps.push({
+            name: "simulate-approve",
+            ok: approveSim.success === true,
+            detail: `gasEstimate=${approveSim.gasEstimate}`,
+            data: approveSim,
+          });
+          if (approveSim.success !== true) throw new Error(`approve simulation failed for ${debtAsset.asset}`);
+          const approveResult = await ops.executeContractCall(approveReq, `${opts.taskId}|approve`);
+          steps.push({
+            name: "execute-approve",
+            ok: approveResult.status === "completed",
+            detail: `executionId=${approveResult.executionId} status=${approveResult.status}`,
+            data: approveResult,
+          });
+          const approveFinal = await ops.pollUntilTerminal(approveResult.executionId);
+          steps.push({
+            name: "verify-approve",
+            ok: approveFinal.status === "completed",
+            detail: `final=${approveFinal.status} receipts=${(approveFinal.receipts ?? []).length}`,
+            data: approveFinal.receipts,
+          });
+          log(opts, `[sentinel] approval final=${approveFinal.status}`);
+          if (approveFinal.status !== "completed") throw new Error(`approve did not complete: ${approveFinal.error ?? "unknown"}`);
+        }
 
-      if (opts.confirm) {
-        const ok = await confirmRepay(debtAsset.asset, decision);
-        if (!ok) {
-          steps.push({ name: "confirm", ok: false, detail: "Repay declined by operator." });
-          log(opts, `[sentinel] operator declined — skipping broadcast`);
+        log(opts, `[sentinel] preflighting repay simulation (no broadcast)`);
+        const sim = await ops.simulateContractCall(repayReq);
+        steps.push({
+          name: "simulate",
+          ok: sim.success === true,
+          detail: `gasEstimate=${sim.gasEstimate} from=${sim.from}`,
+          data: sim,
+        });
+        if (sim.success !== true) {
+          throw new Error(`Simulation failed — treating as hard stop (per KeeperHub safe-first-write sequence).`);
+        }
+
+        const repayTaskId = `${opts.taskId}|repay`;
+        const idempotencyKey = deriveIdempotencyKey({
+          taskId: repayTaskId,
+          chainId: chain.chainId,
+          address: chain.pool,
+          amount: "0",
+          extras: { fn: "repay", args: JSON.stringify([debtAsset.asset, repayAmount, 2, opts.user]) },
+        });
+        log(opts, `[sentinel] idempotency-key=${idempotencyKey.slice(0, 16)}…`);
+
+        if (opts.confirm) {
+          const ok = await confirmRepay(debtAsset.asset, decision);
+          if (!ok) {
+            steps.push({ name: "confirm", ok: false, detail: "Repay declined by operator." });
+            log(opts, `[sentinel] operator declined — skipping broadcast`);
+          } else {
+            execution = await broadcastAndWait(repayReq, repayTaskId, steps, opts);
+          }
         } else {
           execution = await broadcastAndWait(repayReq, repayTaskId, steps, opts);
         }
-      } else {
-        execution = await broadcastAndWait(repayReq, repayTaskId, steps, opts);
       }
     }
   }

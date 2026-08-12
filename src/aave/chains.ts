@@ -22,9 +22,9 @@ export const AAVE_CHAINS: Record<string, AaveChain> = {
     chainId: "11155111",
     name: "Ethereum Sepolia",
     testnet: true,
-    pool: "0xE7EC1B0015eb2ADEedb1B7f9F1Ce82F9DAD6dF08",
-    addressesProvider: "0x0496275d34753A48320CA58103d5220d394FF77F",
-    dataProvider: "0x5C5228aC8BC1528482514aF3e27E692495148717",
+    pool: "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+    addressesProvider: "0x012bAC54348C0E635dCAc9D5FB99f06F24136C9A",
+    dataProvider: "0x3e9708d80f7B3e43118013075F7e95CE3AB31F31",
     explorer: "https://sepolia.etherscan.io",
   },
   "8453": {

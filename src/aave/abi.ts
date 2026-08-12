@@ -81,6 +81,88 @@ export const ERC20_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [
+      { internalType: "address", name: "spender", type: "address" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+    ],
+    name: "approve",
+    outputs: [{ internalType: "bool", name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "owner", type: "address" },
+      { internalType: "address", name: "spender", type: "address" },
+    ],
+    name: "allowance",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+export const DATA_PROVIDER_ABI = [
+  {
+    inputs: [
+      { internalType: "address", name: "asset", type: "address" },
+      { internalType: "address", name: "user", type: "address" },
+    ],
+    name: "getUserReserveData",
+    outputs: [
+      { internalType: "uint256", name: "currentATokenBalance", type: "uint256" },
+      { internalType: "uint256", name: "currentStableDebt", type: "uint256" },
+      { internalType: "uint256", name: "currentVariableDebt", type: "uint256" },
+      { internalType: "uint256", name: "principalStableDebt", type: "uint256" },
+      { internalType: "uint256", name: "scaledVariableDebt", type: "uint256" },
+      { internalType: "uint256", name: "stableBorrowRate", type: "uint256" },
+      { internalType: "uint256", name: "liquidityRate", type: "uint256" },
+      { internalType: "uint40", name: "stableRateLastUpdated", type: "uint40" },
+      { internalType: "bool", name: "usageAsCollateralEnabled", type: "bool" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+export const WETH_ABI = [
+  ...ERC20_ABI,
+  {
+    inputs: [],
+    name: "deposit",
+    outputs: [],
+    stateMutability: "payable",
+    type: "function",
+  },
+] as const;
+
+export const POOL_WRITE_ABI = [
+  {
+    inputs: [
+      { internalType: "address", name: "asset", type: "address" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+      { internalType: "address", name: "onBehalfOf", type: "address" },
+      { internalType: "uint16", name: "referralCode", type: "uint16" },
+    ],
+    name: "supply",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "asset", type: "address" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+      { internalType: "uint256", name: "interestRateMode", type: "uint256" },
+      { internalType: "uint16", name: "referralCode", type: "uint16" },
+      { internalType: "address", name: "onBehalfOf", type: "address" },
+    ],
+    name: "borrow",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
 ] as const;
 
 export const MAX_UINT256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
