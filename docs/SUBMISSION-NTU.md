@@ -78,3 +78,9 @@ strongest web3/AI-agent application.
   V3. Receipt verified at block 11469993, `receiptStatus success`. Full audit
   trail: `docs/runs/sentinel-monitor-4856C803-2026-08-12T01-34-03-644Z.json`;
   post-rescue health factor 106,623.59, debt $0.00.)
+- A second rescue was driven **through the MCP server** (the ChatGPT/Claude
+  interface) on the same position: `sentinel_monitor` over MCP stdio →
+  KeeperHub → on-chain repay → HF 1.320 → 43,737.57
+  (`0x7a757600f94835a0f8e6a1787ca936ff0047b83ca6b360becb540d269e9b23b7`).
+  Walkthrough: `docs/CHATGPT-MCP.md`.
+- Onboarding bounty submission (stackable): `docs/BUILDER-TEARDOWN.md`.

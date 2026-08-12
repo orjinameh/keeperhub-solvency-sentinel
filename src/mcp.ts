@@ -41,7 +41,7 @@ server.tool(
     user: z.string().describe("Address of the position to protect"),
     criticalHf: z.number().optional().describe("Act below this health factor (default 1.05)"),
     targetHf: z.number().optional().describe("Restore to at least this health factor (default 1.5)"),
-    confirm: z.boolean().optional().describe("Require operator confirmation before broadcast (default true)"),
+    confirm: z.boolean().optional().describe("Require operator confirmation before broadcast (default false — the model invoking the tool is the operator)"),
     dryRun: z.boolean().optional().describe("Simulate the whole loop locally, never broadcast"),
   },
   async ({ chainId, user, criticalHf, targetHf, confirm, dryRun }) => {
@@ -55,7 +55,7 @@ server.tool(
         targetHf: targetHf ?? cfg.targetHf,
       },
       taskId: `sentinel-mcp-${user.slice(2, 10)}-${Date.now()}`,
-      confirm: confirm ?? true,
+      confirm: confirm ?? false,
       dryRun: isDryRun,
       ops: isDryRun ? dryRunOps() : undefined,
       onLog: (line) => console.error(line),

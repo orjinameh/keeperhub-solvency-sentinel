@@ -74,6 +74,22 @@ If you want to say anything out loud, one sentence per step is plenty:
 
 Done. That's the whole video.
 
+## Bonus flourish (optional, ~30 extra seconds)
+
+Want to also show the "agent runs another agent" surface? After command 5, run
+one more screenful:
+
+```
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"rec","version":"0"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized"}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sentinel_monitor","arguments":{"chainId":"11155111","user":"0x4856C80305bFb41ADD710eCA576368ec92221113","confirm":false}}}\n' | node --import tsx/esm src/mcp.ts
+```
+
+This drives the exact same protect loop **through the MCP server** (the
+interface ChatGPT/Claude use) — it reads HF, simulates, broadcasts the repay via
+KeeperHub, and returns the verified run report. It rescues whatever position is
+open at that moment (re-borrow first with step 2 if it's already healthy). Only
+do this if you want the extra surface in the video; the 5-command CLI rescue is
+the required story.
+
 ## Keep in mind
 
 - The transaction must be REAL — that's the judge's #1 criterion

@@ -1,6 +1,7 @@
 # KeeperHub Agents Onchain — Submission (DoraHacks BUIDL)
 
-> Deadline: **Aug 13, 2026, 12:00 UTC** (dorahacks.io/hackathon/agents-onchain/detail).
+> Deadline: **Aug 13, 2026, 10:00 UTC** (12:00 UTC+2 / 11:00 WAT) on
+> dorahacks.io/hackathon/agents-onchain/detail.
 > Required: GitHub link · demo video · **link to a real transaction the agent executed via KeeperHub**.
 
 ## Title
@@ -84,6 +85,22 @@ https://sepolia.etherscan.io/tx/0x1c5eae2e1a4c90b54b8573efd78733a1a482b77223128d
 > 6. Receipt **verified on-chain**: `0x1c5eae2e1a4c90b54b8573efd78733a1a482b77223128d55e722e2fa5a1f1348`,
 >    block 11469993, `receiptStatus success`, gas used 205,412.
 > 7. Post-rescue check: health factor **106,623.59**, debt **$0.00**.
+>
+> A **second rescue, driven through the MCP server** (02:37 UTC): a
+> ChatGPT-style client called `sentinel_monitor` over MCP stdio → the sentinel
+> broadcast the repay through KeeperHub (`executionId ojr4n9yyw35644mrppbf9`,
+> sponsored) → receipt verified on-chain → **HF 1.320 → 43,737.57**
+> (`0x7a757600f94835a0f8e6a1787ca936ff0047b83ca6b360becb540d269e9b23b7`).
+> One agent surface (MCP) drove another agent surface (sentinel → KeeperHub).
+
+## Bonus (stackable) — Best Onboarding UX Improvement bounty
+
+`docs/BUILDER-TEARDOWN.md` is a standalone teardown of the five KeeperHub traps
+we hit and fixed (value-in-ETH, `mint` overload ambiguity, function-store gaps
+→ data provider, per-reserve borrowability, and the **24-hour idempotency replay
+window** that made our agent silently "rescue" nothing). It is submission-ready
+for the $1,000 onboarding bounty (split across two winners, stackable with the
+grand prize).
 
 ## Where to find the proof
 Every broadcast writes `executionId`, `transactionHash`, explorer

@@ -24,7 +24,7 @@ financial agent has exactly the failure modes KeeperHub's API is designed to kil
 | Double-execution after a client crash / timeout | **Idempotency-Key** — a SHA-256 digest of `taskId\|chainId\|address\|amount\|effect-fields`, so a retry returns the *same* execution instead of a second tx |
 | Trusting a self-reported tx hash | **Receipts** — poll `GET /api/execute/{id}/status` (honoring `X-Poll-Interval-Hint`) and treat each re-fetched, `verified` receipt as the proof |
 | Unwanted funds movement | `simulate:true` never signs; broadcasts require the org's Turnkey wallet; an operator confirm gate is on by default |
-| 24h replay window swallowing a repeated job | watch-mode keys include a **time bucket + cycle number**, so each cadence run is its own piece of work |
+| 24h replay window swallowing a repeated job | **Run-scoped idempotency keys** — every invocation derives a fresh `runId` folded into the key, so a repeated job lands a *new* execution; a `verify-position` post-check re-reads the health factor and reports **NOT rescued** if a stale replay moved nothing |
 
 ## Architecture
 
@@ -72,7 +72,7 @@ agent polls `originalExecutionId` to learn the outcome of the work it was retryi
 npm install
 cp .env.example .env        # add KEEPERHUB_API_KEY and SENTINEL_USER
 npm run typecheck
-npm test                    # 27 tests: idempotency, decision logic, client errors, e2e loop
+npm test                    # 29 tests: idempotency, decision logic, client errors, e2e loop
 
 npm run check    -- --chain 84532 --user 0x…     # read-only health factor
 npm run monitor  -- --chain 84532 --user 0x…     # one-shot protect
@@ -101,22 +101,44 @@ KeeperHub's backend, not the agent's loop, to own the decision.
 
 ## MCP server (KeeperHub surface #1)
 
-Any MCP-capable agent can drive the sentinel directly. Three tools:
-`sentinel_check` (read-only health factor), `sentinel_monitor` (full protect
-loop, returns the run report), `sentinel_status` (execution + receipts).
+Any MCP-capable agent — **ChatGPT, Claude Code, Claude Desktop, Cursor** — can
+drive the sentinel directly. Three tools: `sentinel_check` (read-only health
+factor), `sentinel_monitor` (full protect loop, returns the run report),
+`sentinel_status` (execution + receipts).
 
 ```bash
 npm run mcp    # stdio MCP server
 ```
 
-Claude Code / other MCP hosts:
+Claude Code:
 
 ```bash
 claude mcp add --transport stdio sentinel -- npm run mcp
 ```
 
-`sentinel_monitor` supports `dryRun` for zero-risk evaluation; live broadcasts
-need `KEEPERHUB_API_KEY` and default to an operator confirm.
+ChatGPT / Claude Desktop (mcpServers config):
+
+```json
+{
+  "mcpServers": {
+    "solvency-sentinel": {
+      "command": "node",
+      "args": ["--import", "tsx/esm", "/absolute/path/to/repo/src/mcp.ts"],
+      "env": {
+        "KEEPERHUB_API_KEY": "kh_…",
+        "SENTINEL_USER": "0x…"
+      }
+    }
+  }
+}
+```
+
+Then in the chat: *"check my Aave position on Sepolia"* →
+`sentinel_check`; *"protect it"* → `sentinel_monitor` (which broadcasts and
+returns the verified run report). `sentinel_monitor` supports `dryRun` for
+zero-risk evaluation and `confirm` for an operator gate; live broadcasts need
+`KEEPERHUB_API_KEY` and are executed by the org's Turnkey wallet.
+Full walkthrough: `docs/CHATGPT-MCP.md`.
 
 ## Supported chains
 
@@ -144,6 +166,14 @@ the KeeperHub execution API:
 | 4 | borrow 50 USDC (variable) | `0x6e5ea1541be4ce616bccf4a69c1b522030ba6e746dea5dcf3d8243495ff19ed7`, `0xb7515de81ea544c70b0c407ef1f30ff96facd45d8e955714a5799ea799ed6275` |
 | 5 | **sentinel rescue**: HF 1.320 < critical 1.5 → approve USDC → repay 50 USDC | approve `0xae8725b8818e616cb55ff06f7698f601cc3f11717bc0616b0d74c3ad82e50f4b` · repay `0x1c5eae2e1a4c90b54b8573efd78733a1a482b77223128d55e722e2fa5a1f1348` (block 11469993) |
 | 6 | post-rescue health factor | **1.320 → 106,623.59**, debt $50 → $0.00 |
+
+A **second, MCP-driven rescue** was executed through the MCP server on the same
+position (02:37 UTC): `sentinel_monitor` called over MCP stdio → broadcast
+`repay` through KeeperHub (`executionId ojr4n9yyw35644mrppbf9`, sponsored) →
+receipt verified on-chain → **HF 1.320 → 43,737.57**. Tx:
+`0x7a757600f94835a0f8e6a1787ca936ff0047b83ca6b360becb540d269e9b23b7`.
+This is the agent-running-through-another-agent surface: a ChatGPT-style client
+drove the sentinel via MCP, and the sentinel executed on-chain via KeeperHub.
 
 Full audit trail: [`docs/runs/sentinel-monitor-4856C803-2026-08-12T01-34-03-644Z.json`](docs/runs/sentinel-monitor-4856C803-2026-08-12T01-34-03-644Z.json).
 The repay was KeeperHub-sponsored (`sponsored: true`), simulated first (gas
