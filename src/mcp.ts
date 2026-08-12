@@ -133,50 +133,54 @@ async function runHttp(port: number, token: string): Promise<void> {
     });
   };
 
-  app.post(
-    "/",
-    (req, res, next) => {
-      if (allowLegacyToken(req)) return next();
-      requireMcpAuth(req, res, next);
-    },
-    async (req, res) => {
-      const sid = sessionHeader(req);
-      if (sid) {
-        const session = sessions.get(sid);
-        if (!session) return sessionNotFound(res);
-        return await session.transport.handleRequest(req, res, req.body);
-      }
+  const mcpAuthGate: express.RequestHandler = (req, res, next) => {
+    if (allowLegacyToken(req)) return next();
+    requireMcpAuth(req, res, next);
+  };
 
-      const server = buildServer();
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomBytes(16).toString("hex"),
-      });
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-      const sessionId = transport.sessionId;
-      if (sessionId) {
-        sessions.set(sessionId, { server, transport });
-        transport.onclose = () => {
-          sessions.delete(sessionId);
-        };
-      }
+  const acceptPatch: express.RequestHandler = (req, _res, next) => {
+    const accept = req.headers.accept;
+    if (!accept || !/(application\/json|text\/event-stream)/.test(accept)) {
+      req.headers.accept = "application/json, text/event-stream";
     }
-  );
+    next();
+  };
 
-  app.delete(
-    "/",
-    (req, res, next) => {
-      if (allowLegacyToken(req)) return next();
-      requireMcpAuth(req, res, next);
-    },
-    async (req, res) => {
-      const sid = sessionHeader(req);
-      const session = sid ? sessions.get(sid) : undefined;
-      if (!session) return res.status(404).json({ error: "session not found" });
-      await session.transport.handleRequest(req, res, req.body);
-      if (sid) sessions.delete(sid);
+  const handlePost: express.RequestHandler = async (req, res) => {
+    const sid = sessionHeader(req);
+    if (sid) {
+      const session = sessions.get(sid);
+      if (!session) return sessionNotFound(res);
+      return await session.transport.handleRequest(req, res, req.body);
     }
-  );
+
+    const server = buildServer();
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomBytes(16).toString("hex"),
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    const sessionId = transport.sessionId;
+    if (sessionId) {
+      sessions.set(sessionId, { server, transport });
+      transport.onclose = () => {
+        sessions.delete(sessionId);
+      };
+    }
+  };
+
+  const handleDelete: express.RequestHandler = async (req, res) => {
+    const sid = sessionHeader(req);
+    const session = sid ? sessions.get(sid) : undefined;
+    if (!session) return res.status(404).json({ error: "session not found" });
+    await session.transport.handleRequest(req, res, req.body);
+    if (sid) sessions.delete(sid);
+  };
+
+  for (const path of ["/", "/mcp"]) {
+    app.post(path, mcpAuthGate, acceptPatch, handlePost);
+    app.delete(path, mcpAuthGate, acceptPatch, handleDelete);
+  }
 
   app.listen(port, () => console.error(`[mcp] HTTP transport listening on :${port}`));
 }
