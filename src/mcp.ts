@@ -398,14 +398,28 @@ async function runHttp(port: number, token: string): Promise<void> {
     res.json({ ok: true, googleConfigured: googleConfigured() });
   });
 
+  const safeReturnTo = (raw: unknown, fallback: string): string => {
+    if (typeof raw !== "string") return fallback;
+    try {
+      const u = new URL(raw, publicUrl);
+      const base = new URL(publicUrl);
+      if (u.origin === base.origin) return u.href;
+    } catch {
+      /* fall through */
+    }
+    if (raw.startsWith("/")) return raw;
+    return fallback;
+  };
+
   app.get("/api/portal/auth/google", (req, res) => {
     if (!googleConfigured()) {
       res.status(400).json({ ok: false, error: "Google Sign-In is not configured on this server." });
       return;
     }
     const state = randomState();
+    const returnTo = safeReturnTo(req.query.return_to, "/portal");
     const redirectUri = `${publicUrl}/api/portal/auth/google/callback`;
-    res.cookie("google_state", state, {
+    res.cookie("google_state", JSON.stringify({ state, returnTo }), {
       httpOnly: true,
       sameSite: "lax",
       secure: (req.headers["x-forwarded-proto"] ?? "http") === "https",
@@ -420,7 +434,18 @@ async function runHttp(port: number, token: string): Promise<void> {
       const code = typeof req.query.code === "string" ? req.query.code : undefined;
       const state = typeof req.query.state === "string" ? req.query.state : undefined;
       const cookies = parseCookies(req.headers.cookie);
-      if (!code || !state || !cookies.google_state || cookies.google_state !== state) {
+      let expectedState = cookies.google_state;
+      let returnTo = "/portal";
+      if (cookies.google_state) {
+        try {
+          const parsed = JSON.parse(cookies.google_state) as { state?: string; returnTo?: string };
+          expectedState = parsed.state ?? "";
+          returnTo = safeReturnTo(parsed.returnTo, "/portal");
+        } catch {
+          expectedState = cookies.google_state;
+        }
+      }
+      if (!code || !state || !expectedState || expectedState !== state) {
         res.status(400).send("Invalid Google Sign-In state. Close this tab and try again.");
         return;
       }
@@ -429,7 +454,7 @@ async function runHttp(port: number, token: string): Promise<void> {
       const user = await findOrCreateGoogleUser(email, sub);
       res.clearCookie("google_state", { path: "/" });
       res.cookie(SESSION_COOKIE, signSession({ uid: user.id, email: user.email }), cookieOptions(req));
-      res.redirect(302, "/portal");
+      res.redirect(302, returnTo);
     } catch (err) {
       res.status(400).send(err instanceof Error ? err.message : "Google Sign-In failed");
     }

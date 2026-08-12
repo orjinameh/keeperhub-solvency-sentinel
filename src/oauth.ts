@@ -263,6 +263,11 @@ button.ghost{background:transparent;border:1px solid var(--line);color:var(--mut
 .switch a{color:var(--acc);cursor:pointer;text-decoration:none}
 .err{color:var(--red);font-size:13px;min-height:1em;margin-top:10px}
 .ok{color:var(--acc);font-size:13px;min-height:1em;margin-top:10px}
+.gbtn{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--txt);font-weight:600;font-size:14px;text-decoration:none;cursor:pointer;font-family:inherit;margin-bottom:0}
+.gbtn:hover{border-color:var(--acc)}
+.gbtn svg{flex:none}
+.divider{display:flex;align-items:center;gap:12px;color:var(--mut);font-size:12.5px;margin:16px 0 4px}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
 </style></head><body>
 <div class="card">
   <div class="logo">S</div>
@@ -271,6 +276,8 @@ button.ghost{background:transparent;border:1px solid var(--line);color:var(--mut
 
   <div id="authBox"${loggedIn ? ' style="display:none"' : ""}>
     <div id="msg" class="err"></div>
+    <a class="gbtn" id="googleBtn" href="/api/portal/auth/google"><svg width="17" height="17" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span>Continue with Google</span></a>
+    <div class="divider">or continue with email</div>
     <form id="loginForm">
       <label>Email</label><input id="loginEmail" type="email" autocomplete="email" required>
       <label>Password</label><input id="loginPassword" type="password" autocomplete="current-password" required>
@@ -303,6 +310,9 @@ ${inputs}
 <script>
 var loggedIn=${loggedIn ? "true" : "false"};
 function $(id){return document.getElementById(id)}
+$("googleBtn").href="/api/portal/auth/google?return_to="+encodeURIComponent(location.href);
+fetch("/api/portal/auth/status").then(function(r){return r.json()}).then(function(d){if(!(d&&d.googleConfigured))$("googleBtn").style.display="none"}).catch(function(){});
+
 function msg(t,ok){var m=$("msg");m.className=ok?"ok":"err";m.textContent=t}
 function showConsent(email){
   $("authBox").style.display="none";
