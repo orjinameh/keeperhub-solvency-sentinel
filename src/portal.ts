@@ -9,6 +9,16 @@ export const portalPage = `<!doctype html>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased}
 .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+.auth-wrap{min-height:70vh;display:grid;place-items:center;padding:40px 24px}
+.auth-card{width:100%;max-width:400px;border:1px solid var(--line);border-radius:18px;background:var(--card);padding:34px}
+.auth-logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;color:#05110a;font-size:22px;font-weight:900;margin-bottom:18px}
+.auth-card h2{font-size:22px;font-weight:800;letter-spacing:-.01em}
+.auth-sub{color:var(--mut);font-size:13.5px;margin:8px 0 22px}
+.auth-card form{display:grid;gap:14px}
+.auth-card label{font-size:12.5px;color:var(--mut)}
+.auth-btn{width:100%;justify-content:center;margin-top:4px}
+.auth-switch{margin-top:16px;font-size:13.5px;color:var(--mut);text-align:center}
+.auth-switch a{color:var(--acc);cursor:pointer;text-decoration:none}
 nav{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;max-width:1120px;margin:0 auto;border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:10px;font-weight:700}
 .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;color:#05110a;font-size:16px;font-weight:900}
@@ -82,11 +92,32 @@ a{color:var(--acc)}
   <div class="brand"><div class="logo">S</div>Solvency Sentinel</div>
   <div class="nav-right">
     <a href="/">Landing</a>
-    <span id="navEmail">…</span>
-    <button class="btn btn-ghost" id="logoutBtn">Log out</button>
+    <span id="navEmail" style="display:none">…</span>
+    <button class="btn btn-ghost" id="logoutBtn" style="display:none">Log out</button>
   </div>
 </nav>
-<main class="wrap">
+
+<div class="auth-wrap" id="auth">
+  <div class="auth-card">
+    <div class="auth-logo">S</div>
+    <h2>Solvency Sentinel</h2>
+    <p class="auth-sub">Sign in to the Control Room to manage your positions, credentials, agent approvals and plugins.</p>
+    <form id="loginForm">
+      <div><label>Email</label><input id="loginEmail" type="email" autocomplete="email" required></div>
+      <div><label>Password</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+      <button class="btn btn-primary auth-btn" type="submit">Sign in</button>
+    </form>
+    <form id="regForm" style="display:none">
+      <div><label>Email</label><input id="regEmail" type="email" autocomplete="email" required></div>
+      <div><label>Password (min 8 chars)</label><input id="regPassword" type="password" minlength="8" autocomplete="new-password" required></div>
+      <button class="btn btn-primary auth-btn" type="submit">Create account</button>
+    </form>
+    <div class="auth-switch" id="authSwitch">New here? <a id="showReg">Create an account</a></div>
+    <div class="msg" id="authMsg"></div>
+  </div>
+</div>
+
+<main class="wrap" id="app" style="display:none">
   <h1>Control Room</h1>
   <div class="sub" id="pageSub">Signing in…</div>
   <div class="tabs">
@@ -179,15 +210,63 @@ document.querySelectorAll(".tab").forEach(function(b){b.addEventListener("click"
 function api(path,opts){
   return fetch(path,opts).then(function(r){return r.json().then(function(d){return {status:r.status,d:d}})})}
 
+function authMsg(txt,ok){
+  var m=$("authMsg");m.className="msg "+(ok?"ok":"err");m.textContent=txt;
+}
+function showAuth(){
+  $("auth").style.display="grid";
+  $("app").style.display="none";
+  $("navEmail").style.display="none";
+  $("logoutBtn").style.display="none";
+}
+function showApp(){
+  $("auth").style.display="none";
+  $("app").style.display="block";
+  $("navEmail").style.display="inline";
+  $("logoutBtn").style.display="inline-flex";
+}
+function toggleAuthMode(reg){
+  $("loginForm").style.display=reg?"none":"grid";
+  $("regForm").style.display=reg?"grid":"none";
+  $("authSwitch").innerHTML=reg?'Have an account? <a id="showLogin">Sign in</a>':'New here? <a id="showReg">Create an account</a>';
+  wireAuthSwitch();
+  authMsg("",true);
+}
+function wireAuthSwitch(){
+  var sr=$("showReg"),sl=$("showLogin");
+  if(sr)sr.addEventListener("click",function(e){e.preventDefault();toggleAuthMode(true)});
+  if(sl)sl.addEventListener("click",function(e){e.preventDefault();toggleAuthMode(false)});
+}
+function submitAuth(path,email,pw,btn){
+  btn.disabled=true;
+  return api(path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:email,password:pw})}).then(function(r){
+    if(r.d.ok){showApp();return loadMe()}
+    authMsg(r.d.error||"Authentication failed.",false);
+    return null;
+  }).catch(function(e){authMsg(e.message,false)}).finally(function(){btn.disabled=false});
+}
+$("loginForm").addEventListener("submit",function(e){
+  e.preventDefault();
+  submitAuth("/api/portal/login",$("loginEmail").value.trim(),$("loginPassword").value,e.target.querySelector("button[type=submit]"));
+});
+$("regForm").addEventListener("submit",function(e){
+  e.preventDefault();
+  submitAuth("/api/portal/register",$("regEmail").value.trim(),$("regPassword").value,e.target.querySelector("button[type=submit]"));
+});
+wireAuthSwitch();
+
 function loadMe(){
   return api("/api/portal/me").then(function(r){
-    if(r.status===401){window.location.href="/portal";return null}
+    if(r.status===401){showAuth();return null}
     state=r.d;
     $("navEmail").textContent=state.user.email;
     $("pageSub").textContent="Welcome back — "+state.user.email;
     renderOverview();renderCredentials();renderAgents();renderPlugins();renderActivity();
     return state;
-  }).catch(function(e){$("pageSub").textContent="Failed to load: "+e.message});
+  }).catch(function(e){
+    $("pageSub").textContent="Failed to load: "+e.message;
+    showAuth();
+  });
 }
 
 function renderOverview(){
@@ -353,7 +432,7 @@ function loadApprovals(){
 }
 
 $("logoutBtn").addEventListener("click",function(){
-  api("/api/portal/logout",{method:"POST"}).then(function(){window.location.href="/portal"});
+  api("/api/portal/logout",{method:"POST"}).then(function(){showAuth()});
 });
 
 document.addEventListener("visibilitychange",function(){if(!document.hidden&&tab==="approvals")loadApprovals()});
