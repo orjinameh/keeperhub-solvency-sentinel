@@ -74,6 +74,14 @@ code{font-family:var(--mono);background:rgba(255,255,255,.06);border:1px solid v
 .check input{flex:1;min-width:210px}
 .check select:focus,.check input:focus{border-color:var(--acc)}
 .check-hint{margin-top:9px;font-size:12.5px;color:var(--mut)}
+.own{border:1px solid var(--line);border-radius:16px;background:var(--card);padding:22px}
+.own-msg{margin:16px 0;font-family:var(--mono);font-size:12.5px;color:var(--mut);border:1px dashed var(--line);border-radius:10px;padding:12px;word-break:break-all}
+.own-alt{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);display:grid;gap:10px}
+.own-alt input{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 12px;font-family:var(--mono);font-size:13px;outline:none}
+.own-alt input:focus{border-color:var(--acc)}
+.own-result{margin-top:14px;font-size:14px}
+.own-result.ok{color:var(--acc)}
+.own-result.err{color:#fb7185}
 /* sections */
 section{padding:72px 0}
 h2{font-size:32px;letter-spacing:-.02em;font-weight:800;margin-bottom:10px}
@@ -201,6 +209,38 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
   </div>
 </section>
 
+<section id="own" style="padding-top:0">
+  <div class="wrap">
+    <h2>Claim a position you own.</h2>
+    <p class="sec-sub">Previewing is open to anyone. <b>Executing a rescue requires proof of ownership</b> &mdash; one signature from the position&rsquo;s wallet. The sentinel refuses to broadcast against addresses that haven&rsquo;t been claimed.</p>
+    <div class="own">
+      <div class="check-row">
+        <select id="ownChain">
+          <option value="11155111">Ethereum Sepolia</option>
+          <option value="84532">Base Sepolia</option>
+          <option value="1">Ethereum</option>
+          <option value="8453">Base</option>
+          <option value="42161">Arbitrum One</option>
+          <option value="137">Polygon</option>
+        </select>
+        <input id="ownAddr" type="text" spellcheck="false" placeholder="0x… wallet you control" style="flex:1;min-width:220px;background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 12px;font-family:var(--mono);outline:none">
+      </div>
+      <div class="own-msg" id="ownMsg">Enter an address to build the signing message.</div>
+      <div class="run-row">
+        <button class="btn btn-primary" id="signBtn">Sign to claim</button>
+        <span class="spin" id="ownSpin"></span>
+        <span style="color:var(--mut);font-size:13px">Uses your injected wallet (MetaMask etc.). One signature &mdash; the key never leaves your wallet.</span>
+      </div>
+      <div class="own-alt">
+        <span style="font-size:13px;color:var(--mut)">No wallet popup (e.g. mobile)? Sign the message in any wallet app and paste the signature:</span>
+        <input id="sigInput" spellcheck="false" placeholder="0x… signature">
+        <button class="btn btn-ghost" id="pasteBtn" style="justify-self:start;padding:9px 16px;font-size:13px">Register signature</button>
+      </div>
+      <div class="own-result" id="ownResult"></div>
+    </div>
+  </div>
+</section>
+
 <section id="connect">
   <div class="wrap">
     <h2>Give ChatGPT a financial watchdog.</h2>
@@ -215,7 +255,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
     <div class="prompts">
       <div class="prompt"><b>&ldquo;Check my Aave position on Ethereum Sepolia — <span style="font-family:var(--mono);font-size:.9em">0x4856&hellip;1113</span>.&rdquo;</b><div class="r">Agent calls <code>sentinel_check</code> on any Aave V3 network &rarr; reports health factor, debt, risk level. Read-only.</div></div>
       <div class="prompt"><b>&ldquo;It&rsquo;s critical &mdash; preview the rescue.&rdquo;</b><div class="r">Agent runs <code>sentinel_monitor</code> with <code>dryRun: true</code> &rarr; full loop simulated, audit report written.</div></div>
-      <div class="prompt"><b>&ldquo;Save it.&rdquo;</b><div class="r">Agent runs the real protect loop &rarr; simulate &rarr; broadcast &rarr; poll &rarr; verify on-chain receipt.</div></div>
+      <div class="prompt"><b>&ldquo;I&rsquo;ve signed the ownership claim on the site — save it.&rdquo;</b><div class="r">Agent runs the real protect loop &rarr; simulate &rarr; broadcast &rarr; poll &rarr; verify on-chain receipt. Broadcast only runs after the wallet&rsquo;s ownership signature is on file.</div></div>
     </div>
   </div>
 </section>
@@ -289,6 +329,76 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
   var checkBtn = document.getElementById("checkBtn");
   var runBtn = document.getElementById("runBtn");
   var spin = document.getElementById("spin");
+  var ownChain = document.getElementById("ownChain");
+  var ownAddr = document.getElementById("ownAddr");
+  var ownMsg = document.getElementById("ownMsg");
+  var signBtn = document.getElementById("signBtn");
+  var ownSpin = document.getElementById("ownSpin");
+  var sigInput = document.getElementById("sigInput");
+  var pasteBtn = document.getElementById("pasteBtn");
+  var ownResult = document.getElementById("ownResult");
+
+  function buildClaimMessage(chainId, address) {
+    var name = chainNames[chainId] || chainId;
+    return "Solvency Sentinel — I control the Aave V3 position on " + name + " (chain id " + chainId + ") at " + address + ".";
+  }
+
+  function showResult(ok, text) {
+    ownResult.textContent = text;
+    ownResult.className = "own-result " + (ok ? "ok" : "err");
+  }
+
+  function refreshClaimMessage() {
+    var a = ownAddr.value.trim();
+    if (/^0x[0-9a-fA-F]{40}$/.test(a)) {
+      ownMsg.textContent = "Sign this message: " + buildClaimMessage(ownChain.value, a);
+    } else {
+      ownMsg.textContent = "Enter a valid address to build the signing message.";
+    }
+  }
+  ownAddr.addEventListener("input", refreshClaimMessage);
+  ownChain.addEventListener("change", refreshClaimMessage);
+
+  function submitClaim(message, signature, cb) {
+    fetch("/api/register-position", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chainId: ownChain.value, address: ownAddr.value.trim(), message: message, signature: signature })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      showResult(d.ok, d.ok ? "Ownership verified for " + shortAddr(ownAddr.value.trim()) + " on " + (chainNames[ownChain.value] || ownChain.value) + ". Rescues can now be executed on it." : d.error || "Registration failed.");
+      cb();
+    }).catch(function (e) { showResult(false, e.message); cb(); });
+  }
+
+  signBtn.addEventListener("click", function () {
+    var a = ownAddr.value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(a)) { showResult(false, "Enter a valid address first."); return; }
+    if (!window.ethereum) { showResult(false, "No injected wallet found. Sign the message in your wallet app and paste the signature below."); return; }
+    signBtn.disabled = true;
+    ownSpin.style.display = "inline-block";
+    var msg = buildClaimMessage(ownChain.value, a);
+    window.ethereum.request({ method: "eth_requestAccounts" }).then(function (accounts) {
+      return window.ethereum.request({ method: "personal_sign", params: [msg, accounts[0]] });
+    }).then(function (sig) {
+      submitClaim(msg, sig, function () {
+        signBtn.disabled = false;
+        ownSpin.style.display = "none";
+      });
+    }).catch(function (e) {
+      showResult(false, "Signing failed or cancelled: " + (e && e.message ? e.message : String(e)));
+      signBtn.disabled = false;
+      ownSpin.style.display = "none";
+    });
+  });
+
+  pasteBtn.addEventListener("click", function () {
+    var a = ownAddr.value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(a)) { showResult(false, "Enter a valid address first."); return; }
+    var sig = sigInput.value.trim();
+    if (!sig) { showResult(false, "Paste the signature first."); return; }
+    pasteBtn.disabled = true;
+    submitClaim(buildClaimMessage(ownChain.value, a), sig, function () { pasteBtn.disabled = false; });
+  });
 
   var chainNames = { "1": "Ethereum", "137": "Polygon", "8453": "Base", "42161": "Arbitrum One", "84532": "Base Sepolia", "11155111": "Ethereum Sepolia" };
   var state = { chainId: "11155111", user: "0x4856C80305bFb41ADD710eCA576368ec92221113" };

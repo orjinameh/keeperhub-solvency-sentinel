@@ -15,6 +15,7 @@ import { writeRunReport } from "./report.ts";
 import { getConfig } from "./config.ts";
 import { installOAuth } from "./oauth.ts";
 import { DEMO_CHAIN, DEMO_USER, landingPage } from "./landing.ts";
+import { ownsPosition, registerPosition } from "./ownership.ts";
 
 const server = new McpServer({
   name: "solvency-sentinel",
@@ -53,6 +54,24 @@ function registerTools(s: McpServer): McpServer {
     async ({ chainId, user, criticalHf, targetHf, dryRun }) => {
       const cfg = getConfig();
       const isDryRun = dryRun ?? false;
+      if (!isDryRun && !ownsPosition(chainId, user)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  level: "unverified",
+                  error: `Refusing to broadcast — no proof that ${user} owns this position. Ownership is verified by a one-time signature from that wallet. Ask the position owner to sign the message on the Solvency Sentinel page (or call sentinel_register), then retry.`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
       const report = await runSentinel({
         chainId,
         user,
@@ -75,6 +94,21 @@ function registerTools(s: McpServer): McpServer {
           },
         ],
       };
+    }
+  );
+
+  s.tool(
+    "sentinel_register",
+    "Register proof of ownership for an Aave position so sentinel_monitor is allowed to broadcast rescues against it. The position owner must sign the message with the owning wallet (personal_sign); the server recovers and verifies the signer. Recording ownership is a read-only side effect — it never broadcasts.",
+    {
+      chainId: z.string().describe("Aave V3 chain id (84532, 11155111, 8453, 42161, 137, 1)"),
+      user: z.string().describe("Address of the position being claimed"),
+      message: z.string().describe("The exact message the wallet signed"),
+      signature: z.string().describe("The hex signature from personal_sign"),
+    },
+    async ({ chainId, user, message, signature }) => {
+      const result = await registerPosition({ chainId, address: user, message, signature });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
 
@@ -158,6 +192,21 @@ async function runHttp(port: number, token: string): Promise<void> {
         onLog: (line) => console.error(line),
       });
       res.json({ ok: true, report });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/register-position", async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as { chainId?: string; address?: string; message?: string; signature?: string };
+      const result = await registerPosition({
+        chainId: body.chainId ?? DEMO_CHAIN,
+        address: body.address ?? "",
+        message: body.message ?? "",
+        signature: body.signature ?? "",
+      });
+      res.json({ ok: result.ok, error: result.error, chainId: body.chainId ?? DEMO_CHAIN, address: body.address });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
