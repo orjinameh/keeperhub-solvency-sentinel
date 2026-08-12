@@ -20,6 +20,7 @@ import { portalPage } from "./portal.ts";
 import {
   decryptSecret,
   encryptSecret,
+  ensureSecretPersisted,
   hashPassword,
   parseCookies,
   SESSION_COOKIE,
@@ -766,6 +767,7 @@ async function runHttp(port: number, token: string): Promise<void> {
     app.delete(path, mcpAuthGate, acceptPatch, handleDelete);
   }
 
+  await ensureSecretPersisted();
   app.listen(port, () => console.error(`[mcp] HTTP transport listening on :${port}`));
 }
 

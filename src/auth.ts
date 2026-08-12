@@ -9,10 +9,11 @@ import {
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getStore } from "./db.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-function loadSecret(): string {
+function loadSecretFromEnvOrFile(): string {
   const env = process.env.PORTAL_SECRET;
   if (env) return env;
   const path = resolve(here, "..", "data", ".portal-secret");
@@ -31,8 +32,30 @@ function loadSecret(): string {
   return s;
 }
 
-const SECRET = loadSecret();
-const AES_KEY = scryptSync(SECRET, "solvency-sentinel-credential-key", 32);
+let SECRET = loadSecretFromEnvOrFile();
+
+/**
+ * Called once at server startup. When PORTAL_SECRET is not set, the secret is
+ * mirrored into the store so it survives process restarts (e.g. Render free
+ * tier cold starts) — keeping session cookies and encrypted credentials valid.
+ */
+export async function ensureSecretPersisted(): Promise<void> {
+  if (process.env.PORTAL_SECRET) return;
+  const store = await getStore();
+  try {
+    const stored = await store.getServerSecret();
+    if (stored) {
+      if (stored !== SECRET) SECRET = stored;
+    } else {
+      await store.setServerSecret(SECRET);
+    }
+  } catch (err) {
+    console.error("[auth] could not persist session secret to store:", err);
+  }
+}
+
+const SESSION_SECRET = () => SECRET;
+const AES_KEY = () => scryptSync(SECRET, "solvency-sentinel-credential-key", 32);
 
 export const SESSION_COOKIE = "sentinel_session";
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -63,7 +86,7 @@ export function signSession(payload: SessionPayload): string {
   const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + SESSION_TTL_MS })).toString(
     "base64url"
   );
-  const sig = createHmac("sha256", SECRET).update(body).digest("base64url");
+  const sig = createHmac("sha256", SESSION_SECRET()).update(body).digest("base64url");
   return `${body}.${sig}`;
 }
 
@@ -73,7 +96,7 @@ export function verifySession(token: string | undefined): SessionPayload | null 
   if (idx <= 0) return null;
   const body = token.slice(0, idx);
   const sig = token.slice(idx + 1);
-  const expected = createHmac("sha256", SECRET).update(body).digest("base64url");
+  const expected = createHmac("sha256", SESSION_SECRET()).update(body).digest("base64url");
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
@@ -107,7 +130,7 @@ export function parseCookies(header: string | undefined): Record<string, string>
 
 export function encryptSecret(plain: string): string {
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", AES_KEY, iv);
+  const cipher = createCipheriv("aes-256-gcm", AES_KEY(), iv);
   const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `v1:${iv.toString("hex")}:${tag.toString("hex")}:${enc.toString("hex")}`;
@@ -118,7 +141,7 @@ export function decryptSecret(enc: string): string {
   if (parts.length !== 4 || parts[0] !== "v1") throw new Error("Unsupported credential format");
   const [, ivHex, tagHex, dataHex] = parts;
   if (!ivHex || !tagHex || !dataHex) throw new Error("Corrupt credential");
-  const decipher = createDecipheriv("aes-256-gcm", AES_KEY, Buffer.from(ivHex, "hex"));
+  const decipher = createDecipheriv("aes-256-gcm", AES_KEY(), Buffer.from(ivHex, "hex"));
   decipher.setAuthTag(Buffer.from(tagHex, "hex"));
   return Buffer.concat([decipher.update(Buffer.from(dataHex, "hex")), decipher.final()]).toString("utf8");
 }

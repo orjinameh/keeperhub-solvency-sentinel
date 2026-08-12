@@ -72,6 +72,9 @@ export interface AgentActivityRec {
 }
 
 export interface Store {
+  getServerSecret(): Promise<string | null>;
+  setServerSecret(secret: string): Promise<void>;
+
   findUserByEmail(email: string): Promise<User | null>;
   findUserById(id: string): Promise<User | null>;
   createUser(user: User): Promise<void>;
@@ -109,6 +112,14 @@ class MemoryStore implements Store {
   private plugins: PluginRec[] = [];
   private approvals: ApprovalRec[] = [];
   private activity: AgentActivityRec[] = [];
+  private serverSecret: string | null = null;
+
+  async getServerSecret(): Promise<string | null> {
+    return this.serverSecret;
+  }
+  async setServerSecret(secret: string): Promise<void> {
+    this.serverSecret = secret;
+  }
 
   async findUserByEmail(email: string): Promise<User | null> {
     return this.users.find((u) => u.email === email.toLowerCase()) ?? null;
@@ -236,6 +247,14 @@ class MongoStore implements Store {
   }
   private async put(coll: string, doc: Document, key: Document): Promise<void> {
     await this.db.collection(coll).replaceOne(key, doc, { upsert: true });
+  }
+
+  async getServerSecret(): Promise<string | null> {
+    const d = await this.findOne("meta", { key: "server_secret" });
+    return d && typeof d.value === "string" ? d.value : null;
+  }
+  async setServerSecret(secret: string): Promise<void> {
+    await this.put("meta", { key: "server_secret", value: secret }, { key: "server_secret" });
   }
 
   async findUserByEmail(email: string): Promise<User | null> {
