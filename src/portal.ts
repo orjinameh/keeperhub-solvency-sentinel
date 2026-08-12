@@ -176,6 +176,13 @@ a{color:var(--acc)}
           <button class="btn btn-primary" id="walletClaimBtn" disabled>Sign &amp; verify</button>
         </div>
       </div>
+      <div class="row">
+        <div class="info">
+          <label style="margin:0 0 4px;display:block;color:var(--mut);font-size:12.5px">Claim chain</label>
+          <select id="walletChain" style="width:260px" disabled></select>
+          <div class="d" style="margin-top:6px">The agent checks the position on this chain. Your wallet's active network is only a default — pick the chain where the position actually lives (e.g. Sepolia = 11155111).</div>
+        </div>
+      </div>
     </div>
     <div class="msg" id="walletMsg"></div>
   </section>
@@ -304,7 +311,18 @@ function walletAvailable(){return !!(window.ethereum&&window.ethereum.request)}
 function claimMessage(chainId,address){
   return "Solvency Sentinel — I control the Aave V3 position on "+chainName(chainId)+" (chain id "+chainId+") at "+address+".";
 }
+function claimChain(){
+  var s=$("walletChain");if(s&&s.value)return s.value;
+  return wallet&&wallet.chainId?String(wallet.chainId):"11155111";
+}
 function walletMsg(t,cls){var m=$("walletMsg");if(m){m.className="msg "+cls;m.textContent=t}}
+(function initChainSelect(){
+  var s=$("walletChain");if(!s)return;
+  CHAINS.forEach(function(c){var o=document.createElement("option");o.value=c[0];o.textContent=c[1]+" (id "+c[0]+")";s.appendChild(o)});
+  s.addEventListener("change",function(){
+    if(wallet){localStorage.setItem("sentinel_claim_chain",s.value);renderWallets()}
+  });
+})();
 function renderWallets(){
   var connected=wallet&&wallet.address;
   $("walletAddr").textContent=connected?wallet.address:"No wallet connected";
@@ -312,7 +330,17 @@ function renderWallets(){
   $("walletConnectBtn").style.display=walletAvailable()?"inline-flex":"none";
   $("walletDisconnectBtn").style.display=connected?"inline-flex":"none";
   $("walletClaimBtn").disabled=!connected;
-  $("walletClaimMsg").textContent=connected?claimMessage(wallet.chainId,wallet.address):"connect a wallet first";
+  var s=$("walletChain");
+  if(s){
+    s.disabled=!connected;
+    if(connected){
+      var want=localStorage.getItem("sentinel_claim_chain");
+      if(!want)want=String(wallet.chainId);
+      var o=s.querySelector('option[value="'+want.replace(/[^\d]/g,"")+'"]');
+      s.value=o?want:wallet.chainId;
+    }
+  }
+  $("walletClaimMsg").textContent=connected?claimMessage(claimChain(),wallet.address):"connect a wallet first";
 }
 $("walletConnectBtn").addEventListener("click",function(){
   if(!walletAvailable()){walletMsg("No browser wallet found (MetaMask or similar).","err");return}
@@ -331,11 +359,12 @@ $("walletClaimBtn").addEventListener("click",function(){
   if(!wallet)return;
   $("walletClaimBtn").disabled=true;
   walletMsg("","ok");
-  var msg=claimMessage(wallet.chainId,wallet.address);
+  var chainId=claimChain();
+  var msg=claimMessage(chainId,wallet.address);
   window.ethereum.request({method:"personal_sign",params:[msg,wallet.address]}).then(function(sig){
-    return api("/api/register-position",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chainId:wallet.chainId,address:wallet.address,message:msg,signature:sig})}).then(function(r){
+    return api("/api/register-position",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chainId:chainId,address:wallet.address,message:msg,signature:sig})}).then(function(r){
       $("walletClaimBtn").disabled=false;
-      if(r.d.ok){walletMsg("Ownership verified. Position added — see Overview.","ok");setTab("overview");return loadMe()}
+      if(r.d.ok){walletMsg("Ownership verified on "+chainName(chainId)+". Position added — see Overview.","ok");setTab("overview");return loadMe()}
       walletMsg(r.d.error||"Registration failed.","err");
     });
   }).catch(function(e){$("walletClaimBtn").disabled=false;walletMsg("Signing failed or cancelled: "+(e.message||String(e)),"err")});
