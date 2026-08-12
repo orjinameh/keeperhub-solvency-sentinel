@@ -11,6 +11,7 @@ export interface User {
   passwordHash: string;
   salt: string;
   createdAt: number;
+  googleSub?: string;
 }
 
 export interface OwnedPositionRec {

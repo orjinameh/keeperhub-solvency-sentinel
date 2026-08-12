@@ -30,6 +30,13 @@ import {
   type SessionPayload,
 } from "./auth.ts";
 import { getStore, randomId, type ApprovalStatus } from "./db.ts";
+import {
+  exchangeGoogleCode,
+  findOrCreateGoogleUser,
+  googleAuthUrl,
+  googleConfigured,
+  randomState,
+} from "./google.ts";
 
 const server = new McpServer({
   name: "solvency-sentinel",
@@ -353,6 +360,10 @@ async function runHttp(port: number, token: string): Promise<void> {
       const email = (body.email ?? "").trim().toLowerCase();
       const user = await (await getStore()).findUserByEmail(email);
       if (!user || !verifyPassword(body.password ?? "", user.salt, user.passwordHash)) {
+        if (user?.googleSub) {
+          res.status(401).json({ ok: false, error: "This account uses Google Sign-In — use the Google button instead." });
+          return;
+        }
         res.status(401).json({ ok: false, error: "Invalid email or password." });
         return;
       }
@@ -360,6 +371,47 @@ async function runHttp(port: number, token: string): Promise<void> {
       res.json({ ok: true, email: user.email });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get("/api/portal/auth/status", (_req, res) => {
+    res.json({ ok: true, googleConfigured: googleConfigured() });
+  });
+
+  app.get("/api/portal/auth/google", (req, res) => {
+    if (!googleConfigured()) {
+      res.status(400).json({ ok: false, error: "Google Sign-In is not configured on this server." });
+      return;
+    }
+    const state = randomState();
+    const redirectUri = `${publicUrl}/api/portal/auth/google/callback`;
+    res.cookie("google_state", state, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: (req.headers["x-forwarded-proto"] ?? "http") === "https",
+      path: "/",
+      maxAge: 10 * 60 * 1000,
+    });
+    res.redirect(302, googleAuthUrl(redirectUri, state));
+  });
+
+  app.get("/api/portal/auth/google/callback", async (req, res) => {
+    try {
+      const code = typeof req.query.code === "string" ? req.query.code : undefined;
+      const state = typeof req.query.state === "string" ? req.query.state : undefined;
+      const cookies = parseCookies(req.headers.cookie);
+      if (!code || !state || !cookies.google_state || cookies.google_state !== state) {
+        res.status(400).send("Invalid Google Sign-In state. Close this tab and try again.");
+        return;
+      }
+      const redirectUri = `${publicUrl}/api/portal/auth/google/callback`;
+      const { email, sub } = await exchangeGoogleCode(code, redirectUri);
+      const user = await findOrCreateGoogleUser(email, sub);
+      res.clearCookie("google_state", { path: "/" });
+      res.cookie(SESSION_COOKIE, signSession({ uid: user.id, email: user.email }), cookieOptions(req));
+      res.redirect(302, "/portal");
+    } catch (err) {
+      res.status(400).send(err instanceof Error ? err.message : "Google Sign-In failed");
     }
   });
 
