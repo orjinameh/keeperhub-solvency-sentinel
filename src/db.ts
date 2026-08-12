@@ -254,6 +254,10 @@ class MongoStore implements Store {
     await this.db.collection(coll).replaceOne(key, doc, { upsert: true });
   }
 
+  collection(name: string): Collection<Document> {
+    return this.db.collection(name);
+  }
+
   async getServerSecret(): Promise<string | null> {
     const d = await this.findOne("meta", { key: "server_secret" });
     return d && typeof d.value === "string" ? d.value : null;
@@ -403,4 +407,16 @@ export async function getStore(): Promise<Store> {
   console.error("[db] MONGODB_URI not set — using in-memory store (state resets on restart)");
   storeInstance = memoryStore();
   return storeInstance;
+}
+
+/**
+ * Returns the collection used to persist the MCP OAuth store (client
+ * registrations and issued tokens), or null when running on the in-memory
+ * store. Persisting this in MongoDB keeps already-connected AI clients
+ * authenticated across server restarts.
+ */
+export async function oauthCollection(): Promise<Collection<Document> | null> {
+  const store = await getStore();
+  if (store.kind === "mongodb") return (store as MongoStore).collection("oauth_state");
+  return null;
 }

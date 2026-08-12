@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Express, Request, RequestHandler, Response } from "express";
+import type { Collection, Document } from "mongodb";
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { InvalidGrantError, InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
@@ -11,6 +12,7 @@ import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/serv
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { parseCookies, SESSION_COOKIE, verifySession, type SessionPayload } from "./auth.ts";
+import { oauthCollection } from "./db.ts";
 
 const ACCESS_TTL_MS = 60 * 60 * 1000;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -46,32 +48,85 @@ function emptyState(): PersistedState {
   return { clients: {}, codes: {}, access: {}, refresh: {} };
 }
 
-function loadState(): PersistedState {
-  try {
-    if (!existsSync(statePath)) return emptyState();
-    const parsed = JSON.parse(readFileSync(statePath, "utf8")) as Partial<PersistedState>;
-    const now = Date.now();
-    const codes = parsed.codes ?? {};
-    const access = parsed.access ?? {};
-    const refresh = parsed.refresh ?? {};
-    for (const k of Object.keys(codes)) { const rec = codes[k]; if (rec && rec.expiresAt < now) delete codes[k]; }
-    for (const k of Object.keys(access)) { const rec = access[k]; if (rec && rec.expiresAt < now) delete access[k]; }
-    for (const k of Object.keys(refresh)) { const rec = refresh[k]; if (rec && rec.expiresAt < now) delete refresh[k]; }
-    return {
-      clients: parsed.clients ?? {},
-      codes,
-      access,
-      refresh,
-    };
-  } catch (err) {
-    console.error("[oauth] failed to load persisted state:", err);
-    return emptyState();
-  }
+interface PersistenceBackend {
+  load(): Promise<PersistedState | null> | PersistedState | null;
+  save(state: PersistedState): void | Promise<void>;
 }
 
+const fileBackend = (path: string): PersistenceBackend => ({
+  load() {
+    try {
+      if (!existsSync(path)) return null;
+      return JSON.parse(readFileSync(path, "utf8")) as PersistedState;
+    } catch (err) {
+      console.error("[oauth] failed to load persisted state:", err);
+      return null;
+    }
+  },
+  save(state) {
+    try {
+      mkdirSync(dirname(path), { recursive: true });
+      const tmp = `${path}.tmp`;
+      writeFileSync(tmp, JSON.stringify(state), "utf8");
+      renameSync(tmp, path);
+    } catch (err) {
+      console.error("[oauth] failed to persist state:", err);
+    }
+  },
+});
+
+/**
+ * Persists the whole OAuth state (registered clients + issued codes/tokens)
+ * as a single document. Keeps AI clients authenticated across server
+ * restarts/deploys, which the ephemeral filesystem on Render cannot do.
+ */
+const mongoBackend = (col: Collection<Document>): PersistenceBackend => ({
+  async load() {
+    try {
+      const doc = await col.findOne({ _id: "state" as unknown as Document });
+      return (doc?.value as PersistedState | undefined) ?? null;
+    } catch (err) {
+      console.error("[oauth] failed to load persisted state from mongo:", err);
+      return null;
+    }
+  },
+  async save(state) {
+    try {
+      await col.replaceOne({ _id: "state" as unknown as Document }, { _id: "state", value: state }, { upsert: true });
+    } catch (err) {
+      console.error("[oauth] failed to persist state to mongo:", err);
+    }
+  },
+});
+
 class FileStore {
-  readonly state: PersistedState = loadState();
+  state: PersistedState = emptyState();
   private timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(private readonly backend: PersistenceBackend) {}
+
+  async hydrate(): Promise<void> {
+    try {
+      const parsed = await this.backend.load();
+      if (!parsed) return;
+      const now = Date.now();
+      for (const key of ["codes", "access", "refresh"] as const) {
+        const map = parsed[key] ?? {};
+        for (const k of Object.keys(map)) {
+          const rec = map[k] as TokenRecord | AuthCodeRecord | undefined;
+          if (rec && rec.expiresAt < now) delete map[k];
+        }
+      }
+      this.state = {
+        clients: parsed.clients ?? {},
+        codes: parsed.codes ?? {},
+        access: parsed.access ?? {},
+        refresh: parsed.refresh ?? {},
+      };
+    } catch (err) {
+      console.error("[oauth] failed to hydrate state:", err);
+    }
+  }
 
   markDirty(): void {
     if (this.timer) return;
@@ -83,14 +138,7 @@ class FileStore {
       clearTimeout(this.timer);
       this.timer = undefined;
     }
-    try {
-      mkdirSync(dirname(statePath), { recursive: true });
-      const tmp = `${statePath}.tmp`;
-      writeFileSync(tmp, JSON.stringify(this.state), "utf8");
-      renameSync(tmp, statePath);
-    } catch (err) {
-      console.error("[oauth] failed to persist state:", err);
-    }
+    void Promise.resolve(this.backend.save(this.state));
   }
 }
 
@@ -370,11 +418,13 @@ export interface OAuthInstallResult {
  * /token, /register, /revoke, /consent) on the app and returns a middleware
  * that enforces Bearer tokens on the MCP endpoint.
  */
-export function installOAuth(app: Express, publicUrl: string): OAuthInstallResult {
+export async function installOAuth(app: Express, publicUrl: string): Promise<OAuthInstallResult> {
   const issuerUrl = new URL(publicUrl);
   const resourceServerUrl = new URL(publicUrl);
-  const store = new FileStore();
-  const provider = new LocalOAuthProvider(store);
+  const oauthCol = await oauthCollection();
+  const oauthStateStore = new FileStore(oauthCol ? mongoBackend(oauthCol) : fileBackend(statePath));
+  await oauthStateStore.hydrate();
+  const provider = new LocalOAuthProvider(oauthStateStore);
   const scopes = ["mcp:use"];
 
   const generousRate = { windowMs: 15 * 60 * 1000, max: 500 };

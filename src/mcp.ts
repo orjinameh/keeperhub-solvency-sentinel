@@ -718,7 +718,7 @@ async function runHttp(port: number, token: string): Promise<void> {
   });
 
   const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
-  const { requireMcpAuth } = installOAuth(app, publicUrl);
+  const { requireMcpAuth } = await installOAuth(app, publicUrl);
 
   const allowLegacyToken = (req: { headers: { authorization?: string } }): boolean =>
     req.headers.authorization === `Bearer ${token}`;
