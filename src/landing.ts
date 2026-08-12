@@ -67,6 +67,13 @@ code{font-family:var(--mono);background:rgba(255,255,255,.06);border:1px solid v
 .fill.red{background:linear-gradient(90deg,#f43f5e,#fb923c)}
 .live-foot{display:flex;justify-content:space-between;margin-top:18px;font-size:12px;color:var(--mut);font-family:var(--mono)}
 .live-foot .dot{width:7px;height:7px;border-radius:50%;background:var(--acc);display:inline-block;margin-right:6px;vertical-align:1px;animation:pulse 2s infinite}
+.check{border:1px solid var(--line);background:var(--card);border-radius:14px;padding:14px;margin-bottom:14px}
+.check-row{display:flex;gap:10px;flex-wrap:wrap}
+.check select,.check input{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 12px;font-size:14px;font-family:var(--mono);outline:none}
+.check select{max-width:158px}
+.check input{flex:1;min-width:210px}
+.check select:focus,.check input:focus{border-color:var(--acc)}
+.check-hint{margin-top:9px;font-size:12.5px;color:var(--mut)}
 /* sections */
 section{padding:72px 0}
 h2{font-size:32px;letter-spacing:-.02em;font-weight:800;margin-bottom:10px}
@@ -139,9 +146,25 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
     </div>
     <p class="meta-note">One MCP server URL. Ask in plain English: <code>check the position</code> &middot; <code>save it</code></p>
   </div>
-  <div class="live">
+  <div>
+    <div class="check">
+      <div class="check-row">
+        <select id="chainSel">
+          <option value="11155111">Ethereum Sepolia</option>
+          <option value="84532">Base Sepolia</option>
+          <option value="1">Ethereum</option>
+          <option value="8453">Base</option>
+          <option value="42161">Arbitrum One</option>
+          <option value="137">Polygon</option>
+        </select>
+        <input id="addrInput" type="text" spellcheck="false" placeholder="0x… any Aave V3 wallet" value="0x4856C80305bFb41ADD710eCA576368ec92221113">
+        <button class="btn btn-primary" id="checkBtn" style="padding:10px 16px">Check</button>
+      </div>
+      <div class="check-hint">Paste any address &middot; the sentinel checks it on-chain, on any Aave V3 network.</div>
+    </div>
+    <div class="live">
     <div class="live-head">
-      <span class="lbl">LIVE POSITION &mdash; Sepolia &middot; Aave V3</span>
+      <span class="lbl">LIVE POSITION &mdash; <span id="posName">Ethereum Sepolia</span> &middot; Aave V3</span>
       <span class="live-badge b-healthy" id="badge">LOADING</span>
     </div>
     <div class="hf-label">Health factor</div>
@@ -158,6 +181,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
       </div>
     </div>
     <div class="live-foot"><span><span class="dot"></span>auto-refreshing</span><span id="updated">&mdash;</span><span id="acct">0x4856&hellip;1113</span></div>
+    </div>
   </div>
 </header>
 
@@ -189,7 +213,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
     </div>
     <div class="url-box"><span style="font-size:13px;color:var(--mut)">Server URL</span><code>https://solvency-sentinel.onrender.com/mcp</code><button class="btn btn-ghost" id="copyBtn" style="padding:6px 12px;font-size:13px">Copy</button></div>
     <div class="prompts">
-      <div class="prompt"><b>&ldquo;Check the solvency MCP for my Aave position on Sepolia, chain id 11155111.&rdquo;</b><div class="r">Agent calls <code>sentinel_check</code> &rarr; reports health factor, debt, risk level. Read-only.</div></div>
+      <div class="prompt"><b>&ldquo;Check my Aave position on Ethereum Sepolia — <span style="font-family:var(--mono);font-size:.9em">0x4856&hellip;1113</span>.&rdquo;</b><div class="r">Agent calls <code>sentinel_check</code> on any Aave V3 network &rarr; reports health factor, debt, risk level. Read-only.</div></div>
       <div class="prompt"><b>&ldquo;It&rsquo;s critical &mdash; preview the rescue.&rdquo;</b><div class="r">Agent runs <code>sentinel_monitor</code> with <code>dryRun: true</code> &rarr; full loop simulated, audit report written.</div></div>
       <div class="prompt"><b>&ldquo;Save it.&rdquo;</b><div class="r">Agent runs the real protect loop &rarr; simulate &rarr; broadcast &rarr; poll &rarr; verify on-chain receipt.</div></div>
     </div>
@@ -259,14 +283,25 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
   var debtFill = document.getElementById("debtFill");
   var updatedEl = document.getElementById("updated");
   var acctEl = document.getElementById("acct");
+  var posNameEl = document.getElementById("posName");
+  var chainSel = document.getElementById("chainSel");
+  var addrInput = document.getElementById("addrInput");
+  var checkBtn = document.getElementById("checkBtn");
   var runBtn = document.getElementById("runBtn");
   var spin = document.getElementById("spin");
 
+  var chainNames = { "1": "Ethereum", "137": "Polygon", "8453": "Base", "42161": "Arbitrum One", "84532": "Base Sepolia", "11155111": "Ethereum Sepolia" };
+  var state = { chainId: "11155111", user: "0x4856C80305bFb41ADD710eCA576368ec92221113" };
+
   function money(v) { return "$" + Number(v).toFixed(2); }
 
+  function shortAddr(a) { return String(a).slice(0, 6) + "…" + String(a).slice(-4); }
+
   function status() {
-    fetch("/api/status").then(function (r) { return r.json(); }).then(function (d) {
-      if (!d.ok) { badgeEl.textContent = "OFFLINE"; return; }
+    posNameEl.textContent = chainNames[state.chainId] || state.chainId;
+    acctEl.textContent = shortAddr(state.user);
+    fetch("/api/status?chainId=" + encodeURIComponent(state.chainId) + "&user=" + encodeURIComponent(state.user)).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) { badgeEl.textContent = "ERROR"; badgeEl.className = "live-badge b-watch"; whyEl.textContent = d.error || "could not read position"; return; }
       var acct = d.account;
       var dec = d.decision;
       var hf = Number(acct.healthFactor);
@@ -283,9 +318,20 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
       collFill.style.width = Math.min(100, (coll / (coll + debt || 1)) * 100) + "%";
       debtFill.style.width = Math.min(100, (debt / (coll + debt || 1)) * 100) + "%";
       updatedEl.textContent = new Date(d.timestamp).toLocaleTimeString();
-      acctEl.textContent = acct.user.slice(0, 6) + "…" + acct.user.slice(-4);
+      acctEl.textContent = shortAddr(d.user);
     }).catch(function () { badgeEl.textContent = "OFFLINE"; });
   }
+
+  checkBtn.addEventListener("click", function () {
+    var u = addrInput.value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(u)) { whyEl.textContent = "That doesn't look like an address — try 0x + 40 hex characters."; badgeEl.textContent = "INVALID"; return; }
+    state.user = u;
+    state.chainId = chainSel.value;
+    badgeEl.textContent = "CHECKING";
+    badgeEl.className = "live-badge b-watch";
+    status();
+  });
+
   status();
   setInterval(status, 12000);
 
@@ -304,8 +350,8 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
     spin.style.display = "inline-block";
     termEl.innerHTML = "";
     var t0 = Date.now();
-    line('<span class="dim">$ sentinel_monitor --chain 11155111 --user 0x4856…1113 --dry-run</span>');
-    fetch("/api/dryrun", { method: "POST" })
+    line('<span class="dim">$ sentinel_monitor --chain ' + esc(state.chainId) + ' --user ' + shortAddr(state.user) + ' --dry-run</span>');
+    fetch("/api/dryrun", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(state) })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         spin.style.display = "none";

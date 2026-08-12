@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { randomBytes } from "node:crypto";
+import { isAddress } from "viem";
 import express from "express";
 import { z } from "zod";
 import { runSentinel } from "./sentinel.ts";
@@ -119,24 +120,37 @@ async function runHttp(port: number, token: string): Promise<void> {
     res.type("html").send(landingPage);
   });
 
-  app.get("/api/status", async (_req, res) => {
+  app.get("/api/status", async (req, res) => {
     try {
-      const chain = getAaveChain(DEMO_CHAIN);
-      const account = await readAccountData(chain, DEMO_USER);
+      const chainId = (req.query.chainId as string | undefined) ?? DEMO_CHAIN;
+      const user = (req.query.user as string | undefined) ?? DEMO_USER;
+      if (!isAddress(user)) {
+        res.status(400).json({ ok: false, error: `Invalid address: ${user}` });
+        return;
+      }
+      const chain = getAaveChain(chainId);
+      const account = await readAccountData(chain, user);
       const cfg = getConfig();
       const decision = decideAction(account, { criticalHf: cfg.criticalHf, targetHf: cfg.targetHf });
-      res.json({ ok: true, timestamp: Date.now(), account: formatAccountData(account), decision });
+      res.json({ ok: true, timestamp: Date.now(), chainId, user, account: formatAccountData(account), decision });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   });
 
-  app.post("/api/dryrun", async (_req, res) => {
+  app.post("/api/dryrun", async (req, res) => {
     try {
+      const body = (req.body ?? {}) as { user?: string; chainId?: string };
+      const chainId = body.chainId ?? DEMO_CHAIN;
+      const user = body.user ?? DEMO_USER;
+      if (!isAddress(user)) {
+        res.status(400).json({ ok: false, error: `Invalid address: ${user}` });
+        return;
+      }
       const cfg = getConfig();
       const report = await runSentinel({
-        chainId: DEMO_CHAIN,
-        user: DEMO_USER,
+        chainId,
+        user,
         policy: { criticalHf: cfg.criticalHf, targetHf: cfg.targetHf },
         taskId: `web-demo-${Date.now()}`,
         confirm: false,
