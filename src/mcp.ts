@@ -1,5 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { randomBytes } from "node:crypto";
+import express from "express";
 import { z } from "zod";
 import { runSentinel } from "./sentinel.ts";
 import { getAaveChain } from "./aave/chains.ts";
@@ -9,6 +12,7 @@ import { getExecutionStatus } from "./keeperhub/client.ts";
 import { dryRunOps } from "./keeperhub/mock.ts";
 import { writeRunReport } from "./report.ts";
 import { getConfig } from "./config.ts";
+import { installOAuth } from "./oauth.ts";
 
 const server = new McpServer({
   name: "solvency-sentinel",
@@ -82,5 +86,66 @@ server.tool(
   }
 );
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+async function runStdio(): Promise<void> {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+async function runHttp(port: number, token: string): Promise<void> {
+  const app = express();
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: false }));
+
+  let transport: StreamableHTTPServerTransport | undefined;
+
+  app.get("/healthz", (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
+  const { requireMcpAuth } = installOAuth(app, publicUrl);
+
+  const allowLegacyToken = (req: { headers: { authorization?: string } }): boolean =>
+    req.headers.authorization === `Bearer ${token}`;
+
+  app.post(
+    "/",
+    (req, res, next) => {
+      if (allowLegacyToken(req)) return next();
+      requireMcpAuth(req, res, next);
+    },
+    async (req, res) => {
+      if (!transport) {
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomBytes(16).toString("hex"),
+        });
+        await server.connect(transport);
+      }
+      await transport.handleRequest(req, res, req.body);
+    }
+  );
+
+  app.delete(
+    "/",
+    (req, res, next) => {
+      if (allowLegacyToken(req)) return next();
+      requireMcpAuth(req, res, next);
+    },
+    async (req, res) => {
+      if (transport) await transport.handleRequest(req, res, req.body);
+      else res.status(404).json({ error: "session not found" });
+    }
+  );
+
+  app.listen(port, () => console.error(`[mcp] HTTP transport listening on :${port}`));
+}
+
+const argv = process.argv.slice(2);
+if (argv.includes("--http") || process.env.MCP_HTTP === "1") {
+  const port = Number(process.env.PORT ?? process.env.MCP_HTTP_PORT ?? "8321");
+  const token = process.env.MCP_HTTP_TOKEN ?? randomBytes(18).toString("hex");
+  console.error(`[mcp] bearer token: ${token}`);
+  await runHttp(port, token);
+} else {
+  await runStdio();
+}

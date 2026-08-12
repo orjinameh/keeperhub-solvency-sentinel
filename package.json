@@ -12,6 +12,7 @@
     "atom": "node --import tsx/esm src/index.ts atom",
     "status": "node --import tsx/esm src/index.ts status",
     "mcp": "node --import tsx/esm src/mcp.ts",
+    "mcp-http": "node --import tsx/esm src/mcp.ts --http",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test test/*.test.ts"
   },
@@ -31,6 +32,7 @@
     "viem": "^2.21.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.9.3"

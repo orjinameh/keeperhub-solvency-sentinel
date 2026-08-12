@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: solvency-sentinel
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run mcp-http
+    healthCheckPath: /healthz
+    envVars:
+      - key: PUBLIC_URL
+        sync: false
+      - key: KEEPERHUB_BASE_URL
+        sync: false
+      - key: SENTINEL_USER
+        sync: false
+      - key: KEEPERHUB_API_KEY
+        sync: false
+      - key: MCP_HTTP_TOKEN
+        sync: false
