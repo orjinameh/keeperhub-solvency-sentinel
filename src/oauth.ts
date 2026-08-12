@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Express, Request, RequestHandler, Response } from "express";
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
@@ -12,11 +15,14 @@ const ACCESS_TTL_MS = 60 * 60 * 1000;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const CODE_TTL_MS = 10 * 60 * 1000;
 
+const here = dirname(fileURLToPath(import.meta.url));
+const statePath = resolve(here, "..", "data", "oauth-state.json");
+
 interface AuthCodeRecord {
   clientId: string;
   codeChallenge: string;
   redirectUri: string;
-  resource?: URL;
+  resource?: string;
   scopes: string[];
   expiresAt: number;
 }
@@ -24,20 +30,80 @@ interface AuthCodeRecord {
 interface TokenRecord {
   clientId: string;
   scopes: string[];
-  resource?: URL;
+  resource?: string;
   expiresAt: number;
 }
 
+interface PersistedState {
+  clients: Record<string, OAuthClientInformationFull>;
+  codes: Record<string, AuthCodeRecord>;
+  access: Record<string, TokenRecord>;
+  refresh: Record<string, TokenRecord>;
+}
+
+function emptyState(): PersistedState {
+  return { clients: {}, codes: {}, access: {}, refresh: {} };
+}
+
+function loadState(): PersistedState {
+  try {
+    if (!existsSync(statePath)) return emptyState();
+    const parsed = JSON.parse(readFileSync(statePath, "utf8")) as Partial<PersistedState>;
+    const now = Date.now();
+    const codes = parsed.codes ?? {};
+    const access = parsed.access ?? {};
+    const refresh = parsed.refresh ?? {};
+    for (const k of Object.keys(codes)) { const rec = codes[k]; if (rec && rec.expiresAt < now) delete codes[k]; }
+    for (const k of Object.keys(access)) { const rec = access[k]; if (rec && rec.expiresAt < now) delete access[k]; }
+    for (const k of Object.keys(refresh)) { const rec = refresh[k]; if (rec && rec.expiresAt < now) delete refresh[k]; }
+    return {
+      clients: parsed.clients ?? {},
+      codes,
+      access,
+      refresh,
+    };
+  } catch (err) {
+    console.error("[oauth] failed to load persisted state:", err);
+    return emptyState();
+  }
+}
+
+class FileStore {
+  readonly state: PersistedState = loadState();
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  markDirty(): void {
+    if (this.timer) return;
+    this.timer = setTimeout(() => this.flush(), 200);
+  }
+
+  flush(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+    try {
+      mkdirSync(dirname(statePath), { recursive: true });
+      const tmp = `${statePath}.tmp`;
+      writeFileSync(tmp, JSON.stringify(this.state), "utf8");
+      renameSync(tmp, statePath);
+    } catch (err) {
+      console.error("[oauth] failed to persist state:", err);
+    }
+  }
+}
+
 class MemoryClientsStore implements OAuthRegisteredClientsStore {
-  private clients = new Map<string, OAuthClientInformationFull>();
+  constructor(private readonly store: FileStore) {}
 
   getClient(clientId: string): OAuthClientInformationFull | undefined {
-    return this.clients.get(clientId);
+    return this.store.state.clients[clientId];
   }
 
   registerClient(client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">): OAuthClientInformationFull {
     const full = client as OAuthClientInformationFull;
-    this.clients.set(full.client_id, full);
+    this.store.state.clients[full.client_id] = full;
+    this.store.markDirty();
     return full;
   }
 }
@@ -48,10 +114,11 @@ class MemoryClientsStore implements OAuthRegisteredClientsStore {
  * server instance and are bound to the RFC 8707 resource that was requested.
  */
 export class LocalOAuthProvider implements OAuthServerProvider {
-  readonly clientsStore: OAuthRegisteredClientsStore = new MemoryClientsStore();
-  private codes = new Map<string, AuthCodeRecord>();
-  private access = new Map<string, TokenRecord>();
-  private refresh = new Map<string, TokenRecord>();
+  readonly clientsStore: OAuthRegisteredClientsStore;
+
+  constructor(private readonly store: FileStore) {
+    this.clientsStore = new MemoryClientsStore(store);
+  }
 
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
     res.status(200).send(consentPage(client.client_id, params));
@@ -65,19 +132,20 @@ export class LocalOAuthProvider implements OAuthServerProvider {
     scopes: string[]
   ): string {
     const code = randomBytes(24).toString("hex");
-    this.codes.set(code, {
+    this.store.state.codes[code] = {
       clientId,
       codeChallenge,
       redirectUri,
-      resource,
+      resource: resource?.href,
       scopes,
       expiresAt: Date.now() + CODE_TTL_MS,
-    });
+    };
+    this.store.markDirty();
     return code;
   }
 
   async challengeForAuthorizationCode(_client: OAuthClientInformationFull, authorizationCode: string): Promise<string> {
-    const rec = this.codes.get(authorizationCode);
+    const rec = this.store.state.codes[authorizationCode];
     if (!rec) throw new InvalidGrantError("Invalid authorization code");
     return rec.codeChallenge;
   }
@@ -89,12 +157,13 @@ export class LocalOAuthProvider implements OAuthServerProvider {
     redirectUri?: string,
     resource?: URL
   ): Promise<OAuthTokens> {
-    const rec = this.codes.get(authorizationCode);
+    const rec = this.store.state.codes[authorizationCode];
     if (!rec || rec.clientId !== client.client_id) throw new InvalidGrantError("Invalid authorization code");
-    this.codes.delete(authorizationCode);
+    delete this.store.state.codes[authorizationCode];
     if (redirectUri && redirectUri !== rec.redirectUri) throw new InvalidGrantError("redirect_uri does not match the authorization request");
     if (rec.expiresAt < Date.now()) throw new InvalidGrantError("Authorization code has expired");
-    return this.issueTokens(client.client_id, rec.scopes, resource ?? rec.resource);
+    this.store.markDirty();
+    return this.issueTokens(client.client_id, rec.scopes, resource ?? (rec.resource ? new URL(rec.resource) : undefined));
   }
 
   async exchangeRefreshToken(
@@ -103,17 +172,19 @@ export class LocalOAuthProvider implements OAuthServerProvider {
     scopes?: string[],
     resource?: URL
   ): Promise<OAuthTokens> {
-    const rec = this.refresh.get(refreshToken);
+    const rec = this.store.state.refresh[refreshToken];
     if (!rec || rec.clientId !== client.client_id) throw new InvalidGrantError("Invalid refresh token");
-    this.refresh.delete(refreshToken);
-    return this.issueTokens(client.client_id, scopes ?? rec.scopes, resource ?? rec.resource);
+    delete this.store.state.refresh[refreshToken];
+    this.store.markDirty();
+    return this.issueTokens(client.client_id, scopes ?? rec.scopes, resource ?? (rec.resource ? new URL(rec.resource) : undefined));
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const rec = this.access.get(token);
+    const rec = this.store.state.access[token];
     if (!rec) throw new InvalidTokenError("Invalid access token");
     if (rec.expiresAt < Date.now()) {
-      this.access.delete(token);
+      delete this.store.state.access[token];
+      this.store.markDirty();
       throw new InvalidTokenError("Access token has expired");
     }
     return {
@@ -121,20 +192,31 @@ export class LocalOAuthProvider implements OAuthServerProvider {
       clientId: rec.clientId,
       scopes: rec.scopes,
       expiresAt: Math.floor(rec.expiresAt / 1000),
-      resource: rec.resource,
+      resource: rec.resource ? new URL(rec.resource) : undefined,
     };
   }
 
   async revokeToken(client: OAuthClientInformationFull, request: { token: string; token_type_hint?: string }): Promise<void> {
-    if (!request.token_type_hint || request.token_type_hint === "access_token") this.access.delete(request.token);
-    if (!request.token_type_hint || request.token_type_hint === "refresh_token") this.refresh.delete(request.token);
+    if (!request.token_type_hint || request.token_type_hint === "access_token") {
+      if (this.store.state.access[request.token]) {
+        delete this.store.state.access[request.token];
+        this.store.markDirty();
+      }
+    }
+    if (!request.token_type_hint || request.token_type_hint === "refresh_token") {
+      if (this.store.state.refresh[request.token]) {
+        delete this.store.state.refresh[request.token];
+        this.store.markDirty();
+      }
+    }
   }
 
   private issueTokens(clientId: string, scopes: string[], resource: URL | undefined): OAuthTokens {
     const accessToken = randomBytes(32).toString("hex");
     const refreshToken = randomBytes(32).toString("hex");
-    this.access.set(accessToken, { clientId, scopes, resource, expiresAt: Date.now() + ACCESS_TTL_MS });
-    this.refresh.set(refreshToken, { clientId, scopes, resource, expiresAt: Date.now() + REFRESH_TTL_MS });
+    this.store.state.access[accessToken] = { clientId, scopes, resource: resource?.href, expiresAt: Date.now() + ACCESS_TTL_MS };
+    this.store.state.refresh[refreshToken] = { clientId, scopes, resource: resource?.href, expiresAt: Date.now() + REFRESH_TTL_MS };
+    this.store.markDirty();
     return {
       access_token: accessToken,
       token_type: "Bearer",
@@ -187,7 +269,8 @@ export interface OAuthInstallResult {
 export function installOAuth(app: Express, publicUrl: string): OAuthInstallResult {
   const issuerUrl = new URL(publicUrl);
   const resourceServerUrl = new URL(publicUrl);
-  const provider = new LocalOAuthProvider();
+  const store = new FileStore();
+  const provider = new LocalOAuthProvider(store);
   const scopes = ["mcp:use"];
 
   const generousRate = { windowMs: 15 * 60 * 1000, max: 500 };
