@@ -10,6 +10,7 @@ import type { OAuthServerProvider, AuthorizationParams } from "@modelcontextprot
 import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { parseCookies, SESSION_COOKIE, verifySession, type SessionPayload } from "./auth.ts";
 
 const ACCESS_TTL_MS = 60 * 60 * 1000;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -121,7 +122,8 @@ export class LocalOAuthProvider implements OAuthServerProvider {
   }
 
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
-    res.status(200).send(consentPage(client.client_id, params));
+    const session = res.locals.sentinelUser as SessionPayload | null;
+    res.status(200).send(consentPage(client.client_id, params, session));
   }
 
   issueCode(
@@ -227,7 +229,7 @@ export class LocalOAuthProvider implements OAuthServerProvider {
   }
 }
 
-function consentPage(clientId: string, params: AuthorizationParams): string {
+function consentPage(clientId: string, params: AuthorizationParams, session: SessionPayload | null): string {
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fields: Array<[string, string]> = [
@@ -239,20 +241,84 @@ function consentPage(clientId: string, params: AuthorizationParams): string {
     ["resource", params.resource?.href ?? ""],
   ];
   const inputs = fields.map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join("\n");
+  const email = session?.email ?? "";
+  const loggedIn = !!email;
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Authorize Solvency Sentinel</title>
-<style>body{font-family:system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1rem;color:#1a202c}
-code{background:#f1f5f9;padding:.1rem .3rem;border-radius:.25rem;font-size:.85em}
-button{margin-top:1rem;background:#16a34a;color:#fff;border:0;padding:.7rem 1.4rem;border-radius:.5rem;font-size:1rem;cursor:pointer}</style>
-</head><body>
-<h1>Authorize Solvency Sentinel</h1>
-<p>A client requested access to your Solvency Sentinel MCP server
-(<code>${esc(params.resource?.href ?? "this server")}</code>).</p>
-<p>This lets the agent read the protected Aave position and execute rescue repayments.</p>
-<form action="/consent" method="post">
+<html lang="en"><head><meta charset="utf-8"><title>Connect ChatGPT to Solvency Sentinel</title>
+<style>
+:root{--bg:#05070d;--card:#0b0f1a;--line:rgba(255,255,255,.08);--txt:#e8edf7;--mut:#8b94a7;--acc:#34d399;--red:#f43f5e}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.55;display:grid;place-items:center;min-height:100vh;padding:40px 20px;-webkit-font-smoothing:antialiased}
+.card{width:100%;max-width:420px;border:1px solid var(--line);border-radius:18px;background:var(--card);padding:32px}
+.logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#34d399,#a3e635);display:grid;place-items:center;color:#05110a;font-size:22px;font-weight:900;margin-bottom:16px}
+h1{font-size:20px;font-weight:800;letter-spacing:-.01em}
+p{color:var(--mut);font-size:13.5px;margin:8px 0 20px}
+code{background:#111827;padding:.1rem .35rem;border-radius:.3rem;font-size:.85em;color:#e8edf7}
+label{display:block;font-size:12.5px;color:var(--mut);margin:14px 0 6px}
+input{width:100%;background:#0e1424;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 12px;font-size:14px;font-family:inherit;outline:none}
+input:focus{border-color:var(--acc)}
+button{margin-top:18px;width:100%;background:var(--acc);color:#05110a;font-weight:700;border:0;padding:11px;border-radius:10px;font-size:14.5px;cursor:pointer;font-family:inherit}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--mut);margin-top:10px}
+.switch{text-align:center;margin-top:14px;font-size:13px;color:var(--mut)}
+.switch a{color:var(--acc);cursor:pointer;text-decoration:none}
+.err{color:var(--red);font-size:13px;min-height:1em;margin-top:10px}
+.ok{color:var(--acc);font-size:13px;min-height:1em;margin-top:10px}
+</style></head><body>
+<div class="card">
+  <div class="logo">S</div>
+  <h1>Connect an AI agent</h1>
+  <p>A client (<code>${esc(clientId)}</code>) is requesting access to your Solvency Sentinel MCP server so it can read your protected positions and execute rescue repayments — each broadcast is held for your approval in the Control Room.</p>
+
+  <div id="authBox"${loggedIn ? ' style="display:none"' : ""}>
+    <div id="msg" class="err"></div>
+    <form id="loginForm">
+      <label>Email</label><input id="loginEmail" type="email" autocomplete="email" required>
+      <label>Password</label><input id="loginPassword" type="password" autocomplete="current-password" required>
+      <button type="submit">Sign in &amp; authorize</button>
+    </form>
+    <form id="regForm" style="display:none">
+      <label>Email</label><input id="regEmail" type="email" autocomplete="email" required>
+      <label>Password (min 8 chars)</label><input id="regPassword" type="password" minlength="8" autocomplete="new-password" required>
+      <button type="submit">Create account &amp; authorize</button>
+    </form>
+    <div class="switch" id="authSwitch">New here? <a id="showReg">Create an account</a></div>
+  </div>
+
+  <div id="consentBox"${loggedIn ? "" : ' style="display:none"'}">
+    <div class="ok" id="signedIn">${loggedIn ? "Signed in as <b>" + esc(email) + "</b>" : ""}</div>
+    <p style="margin-top:6px">Only your verified positions can be checked or rescued — every other address is refused.</p>
+    <form action="/consent" method="post">
 ${inputs}
-<button type="submit">Authorize</button>
-</form>
+      <button type="submit">Authorize</button>
+    </form>
+  </div>
+</div>
+<script>
+var loggedIn=${loggedIn ? "true" : "false"};
+function $(id){return document.getElementById(id)}
+function msg(t,ok){var m=$("msg");m.className=ok?"ok":"err";m.textContent=t}
+function showConsent(email){
+  $("authBox").style.display="none";
+  $("consentBox").style.display="block";
+  $("signedIn").innerHTML="Signed in as <b>"+email.replace(/[<>&]/g,"")+"</b>";
+}
+function submit(path,email,pw){
+  return fetch(path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:email,password:pw})}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){showConsent(email);return}
+    msg(d.error||"Authentication failed.",false);
+  }).catch(function(e){msg(e.message,false)});
+}
+$("loginForm").addEventListener("submit",function(e){e.preventDefault();submit("/api/portal/login",$("loginEmail").value.trim(),$("loginPassword").value)});
+$("regForm").addEventListener("submit",function(e){e.preventDefault();submit("/api/portal/register",$("regEmail").value.trim(),$("regPassword").value)});
+$("showReg").addEventListener("click",function(){
+  $("loginForm").style.display="none";$("regForm").style.display="block";
+  $("authSwitch").innerHTML='Have an account? <a id="showLogin">Sign in</a>';
+  $("showLogin").addEventListener("click",function(){
+    $("regForm").style.display="none";$("loginForm").style.display="block";
+    $("authSwitch").innerHTML='New here? <a id="showReg">Create an account</a>';
+  });
+});
+</script>
 </body></html>`;
 }
 
@@ -274,6 +340,13 @@ export function installOAuth(app: Express, publicUrl: string): OAuthInstallResul
   const scopes = ["mcp:use"];
 
   const generousRate = { windowMs: 15 * 60 * 1000, max: 500 };
+
+  const attachSession: RequestHandler = (req: Request, res: Response, next) => {
+    const cookies = parseCookies(req.headers.cookie);
+    res.locals.sentinelUser = verifySession(cookies[SESSION_COOKIE]);
+    next();
+  };
+  app.use(attachSession);
 
   app.use(
     mcpAuthRouter({
