@@ -35,6 +35,18 @@ export const realOps: KeeperHubOps = {
   pollUntilTerminal,
 };
 
+export interface SentinelApprovalRequest {
+  id: string;
+  chainId: string;
+  user: string;
+  taskId: string;
+  summary: string;
+  payload: unknown;
+  createdAt: number;
+}
+
+export type SentinelApprovalDecision = "approved" | "rejected" | "timeout";
+
 export interface SentinelRunOptions {
   chainId: string;
   user: string;
@@ -45,6 +57,11 @@ export interface SentinelRunOptions {
   dryRun?: boolean;
   ops?: KeeperHubOps;
   onLog?: (line: string) => void;
+  /**
+   * When set, a real broadcast is held until the returned decision arrives.
+   * Used to gate repay broadcasts behind a human approval in a dashboard.
+   */
+  requestApproval?: (approval: SentinelApprovalRequest) => Promise<SentinelApprovalDecision>;
 }
 
 export interface SentinelStep {
@@ -226,7 +243,36 @@ export async function runSentinel(opts: SentinelRunOptions): Promise<SentinelRun
         });
         log(opts, `[sentinel] idempotency-key=${idempotencyKey.slice(0, 16)}… (run-scoped, unique per invocation)`);
 
-        if (opts.confirm) {
+        if (opts.requestApproval) {
+          const approvalId = `apv_${randomBytes(4).toString("hex")}`;
+          const approvalDecision = await opts.requestApproval({
+            id: approvalId,
+            chainId: chain.chainId,
+            user: opts.user,
+            taskId: repayTaskId,
+            summary: `Repay ${debtAsset.asset} debt on ${chain.name} for ${opts.user} — ${decision.reason}`,
+            payload: repayReq,
+            createdAt: Date.now(),
+          });
+          steps.push({
+            name: "approval",
+            ok: approvalDecision === "approved",
+            detail: `decision=${approvalDecision} approvalId=${approvalId}`,
+            data: { approvalId, decision: approvalDecision },
+          });
+          log(opts, `[sentinel] approval=${approvalDecision} (${approvalId})`);
+          if (approvalDecision === "approved") {
+            execution = await broadcastAndWait(repayReq, repayTaskId, steps, opts);
+          } else {
+            steps.push({
+              name: "broadcast-skipped",
+              ok: false,
+              detail: `Approval ${approvalDecision} — repay not broadcast.`,
+              data: { approvalId },
+            });
+            log(opts, `[sentinel] broadcast skipped — approval ${approvalDecision}`);
+          }
+        } else if (opts.confirm) {
           const ok = await confirmRepay(debtAsset.asset, decision);
           if (!ok) {
             steps.push({ name: "confirm", ok: false, detail: "Repay declined by operator." });

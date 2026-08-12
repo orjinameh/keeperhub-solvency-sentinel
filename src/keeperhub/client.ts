@@ -127,12 +127,19 @@ export interface ExecutionStatusResponse {
   [k: string]: unknown;
 }
 
+let apiKeyOverride: string | undefined;
+
+/** Temporary per-request key override so dashboard runs can use a user's stored credential. */
+export function setApiKeyOverride(key: string | undefined): void {
+  apiKeyOverride = key;
+}
+
 async function request(
   path: string,
   init: { method?: string; body?: unknown; idempotencyKey?: string; timeoutMs?: number }
 ): Promise<{ status: number; headers: Headers; body: any }> {
   const cfg = getConfig();
-  const apiKey = requireApiKey(cfg);
+  const apiKey = apiKeyOverride && apiKeyOverride.length > 0 ? apiKeyOverride : requireApiKey(cfg);
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${apiKey}`);
   if (init.body !== undefined) headers.set("Content-Type", "application/json");

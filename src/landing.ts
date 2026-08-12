@@ -139,6 +139,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
     <a href="#connect">Connect</a>
     <a href="#how">How it works</a>
     <a href="#trust">Trust</a>
+    <a href="/portal" style="color:var(--acc)">Control Room</a>
     <span class="pill">&#9679; live on Sepolia</span>
   </div>
 </nav>
