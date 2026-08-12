@@ -238,12 +238,7 @@ function toggleAuthMode(reg){
   $("loginForm").style.display=reg?"none":"grid";
   $("regForm").style.display=reg?"grid":"none";
   $("authSwitch").innerHTML=reg?'Have an account? <a id="showLogin">Sign in</a>':'New here? <a id="showReg">Create an account</a>';
-wireAuthSwitch();
-
-fetch("/api/portal/auth/status").then(function(r){return r.json()}).then(function(d){
-  if(!d.googleConfigured)$("googleBtn").style.display="none";
-}).catch(function(){});
-
+  wireAuthSwitch();
   authMsg("",true);
 }
 function wireAuthSwitch(){
@@ -268,6 +263,10 @@ $("regForm").addEventListener("submit",function(e){
   submitAuth("/api/portal/register",$("regEmail").value.trim(),$("regPassword").value,e.target.querySelector("button[type=submit]"));
 });
 wireAuthSwitch();
+
+fetch("/api/portal/auth/status").then(function(r){return r.json()}).then(function(d){
+  if(!d.googleConfigured)$("googleBtn").style.display="none";
+}).catch(function(){});
 
 function loadMe(){
   return api("/api/portal/me").then(function(r){
@@ -331,7 +330,7 @@ function dryRun(idx,btn){
     var rep=d.report;
     var lvl=rep.decision.level;
     out.innerHTML="<span class='badge "+ (lvl==="healthy"?"b-ok":lvl==="watch"?"b-warn":"b-bad") +"'>"+esc(lvl.toUpperCase())+"</span> "+esc(rep.decision.reason)+"<br>"+esc((rep.steps||[]).map(function(s){return s.name+": "+s.ok} ).join(" → "));
-    var ex=rep.execution;if(ex&&ex.transactionLink){out.innerHTML+="<br>tx: <a href=\""+esc(ex.transactionLink)+"\" target=\"_blank\">"+esc(ex.transactionLink)+"</a>"}
+    var ex=rep.execution;if(ex&&ex.transactionLink){out.innerHTML+='<br>tx: <a href="'+esc(ex.transactionLink)+'" target="_blank">'+esc(ex.transactionLink)+'</a>'}
     out.innerHTML+="<br>ran "+ts(rep.startedAt)+" (dry run, nothing broadcast)";
   }).catch(function(e){out.textContent="✗ "+e.message}).then(function(){btn.disabled=false;btn.textContent=orig});
 }
@@ -374,7 +373,7 @@ function renderActivity(){
   var tbody=document.querySelector("#actTbl tbody");
   if(!rows.length){tbody.innerHTML='<tr><td colspan="5" style="color:var(--mut)">No calls recorded yet — talk to the agent.</td></tr>';return}
   tbody.innerHTML=rows.map(function(a){
-    return "<tr><td>"+ts(a.at)+"</td><td><code>"+esc(a.tool)+"</code></td><td class=\"mono\">"+esc(a.args)+"</td><td>"+statusBadge(a.ok?"ok":"fail")+"</td><td>"+a.ms+"</td></tr>";
+    return '<tr><td>'+ts(a.at)+'</td><td><code>'+esc(a.tool)+'</code></td><td class="mono">'+esc(a.args)+'</td><td>'+statusBadge(a.ok?"ok":"fail")+'</td><td>'+a.ms+'</td></tr>';
   }).join("");
   var ov=$("ovActivity");
   if(!rows.length){ov.innerHTML='<div class="empty">No agent activity yet.</div>';return}
@@ -403,8 +402,8 @@ function renderPlugins(){
     savePlugin(b.dataset.toggle,b.dataset.en==="1"?false:true,null,null,function(){renderPlugins()});
   })});
   el.querySelectorAll("[data-save]").forEach(function(b){b.addEventListener("click",function(){
-    var crit=el.querySelector("[data-c=\""+b.dataset.save+"\"][data-f=crit]").value;
-    var tgt=el.querySelector("[data-c=\""+b.dataset.save+"\"][data-f=target]").value;
+    var crit=el.querySelector('[data-c="'+b.dataset.save+'"][data-f=crit]').value;
+    var tgt=el.querySelector('[data-c="'+b.dataset.save+'"][data-f=target]').value;
     savePlugin(b.dataset.save,null,Number(crit),Number(tgt),function(){renderPlugins()});
   })});
 }
