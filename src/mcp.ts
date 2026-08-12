@@ -13,6 +13,7 @@ import { dryRunOps } from "./keeperhub/mock.ts";
 import { writeRunReport } from "./report.ts";
 import { getConfig } from "./config.ts";
 import { installOAuth } from "./oauth.ts";
+import { DEMO_CHAIN, DEMO_USER, landingPage } from "./landing.ts";
 
 const server = new McpServer({
   name: "solvency-sentinel",
@@ -112,6 +113,41 @@ async function runHttp(port: number, token: string): Promise<void> {
 
   app.get("/healthz", (_req, res) => {
     res.json({ ok: true });
+  });
+
+  app.get("/", (_req, res) => {
+    res.type("html").send(landingPage);
+  });
+
+  app.get("/api/status", async (_req, res) => {
+    try {
+      const chain = getAaveChain(DEMO_CHAIN);
+      const account = await readAccountData(chain, DEMO_USER);
+      const cfg = getConfig();
+      const decision = decideAction(account, { criticalHf: cfg.criticalHf, targetHf: cfg.targetHf });
+      res.json({ ok: true, timestamp: Date.now(), account: formatAccountData(account), decision });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/dryrun", async (_req, res) => {
+    try {
+      const cfg = getConfig();
+      const report = await runSentinel({
+        chainId: DEMO_CHAIN,
+        user: DEMO_USER,
+        policy: { criticalHf: cfg.criticalHf, targetHf: cfg.targetHf },
+        taskId: `web-demo-${Date.now()}`,
+        confirm: false,
+        dryRun: true,
+        ops: dryRunOps(),
+        onLog: (line) => console.error(line),
+      });
+      res.json({ ok: true, report });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
